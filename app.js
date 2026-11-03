@@ -1,7 +1,7 @@
 (function(){
   'use strict';
   var STAGES={GENERAL:'GENERAL',TOP_16:'TOP_16',TOP_8:'TOP_8',TOP_4:'TOP_4',SEMIFINAL:'SEMIFINAL',FINAL:'FINAL',ZONE_FINAL:'ZONE_FINAL',FINISHED:'FINISHED'},LABELS={GENERAL:'Primera etapa · zonas',TOP_16:'Top 16',TOP_8:'Top 8',TOP_4:'Top 4',SEMIFINAL:'Semifinales',FINAL:'Final',ZONE_FINAL:'Segunda etapa · zona única',FINISHED:'Finalizado'},STATUS={ACTIVE:'ACTIVE',QUALIFIED:'QUALIFIED',ELIMINATED:'ELIMINATED',CHAMPION:'CHAMPION',RUNNER_UP:'RUNNER_UP'},STATUS_LABELS={ACTIVE:'Activo',QUALIFIED:'Clasificado',ELIMINATED:'Eliminado',CHAMPION:'Campeón',RUNNER_UP:'Subcampeón'},ZONE_STATUS={CONFIGURING:'CONFIGURING',IN_PROGRESS:'IN_PROGRESS',PENDING_CLOSE:'PENDING_CLOSE',FINISHED:'FINISHED'},ZONE_STATUS_LABELS={CONFIGURING:'En configuración',IN_PROGRESS:'En curso',PENDING_CLOSE:'Pendiente de cierre',FINISHED:'Finalizada'},KEY='puntaje-newcom-state';
-  var app=document.getElementById('app'),modal=document.getElementById('modal'),state,view='home',theme='light',matchPhaseFilter='ALL',matchZoneFilter='ALL';
+  var app=document.getElementById('app'),modal=document.getElementById('modal'),state,view='home',theme='light',matchPhaseFilter='ALL',matchZoneFilter='ALL',toastState=null,loaderDraft=null;
   function empty(){return{categories:[],teams:[],matchResults:[],selectedCategoryId:null,theme:'light'};}
   function starterState(){
     var categoryId='demo-cat-50',teams=[],zones=[],matches=[],teamMap={},zoneNames=['Zona 4','Zona 5','Zona 6','Zona 10','Zona 11'],zoneTeams=[
@@ -135,12 +135,224 @@
   }
   function table(){var c=category(),f=zoneFlow(c),zones=c.currentStage===STAGES.ZONE_FINAL?[zoneById(c,f.secondStageZoneId)]:f.zones.filter(function(z){return z.id!==f.secondStageZoneId;});zones=zones.filter(Boolean);var hasAssigned=zones.some(function(z){return z.teamIds.length;});return'<div class="toolbar"><div><h2>Clasificación por zona</h2><p class="desc">Cada tabla usa sólo los resultados de su zona. Desempate: puntos por resultados (3, 2, 1, 0), puntos a favor y luego menos puntos en contra.</p></div></div>'+(zones.length&&hasAssigned?'<div class="zone-grid">'+zones.map(function(z){return'<section class="card zone-card"><div class="card-title"><div><p class="eyebrow">ZONA</p><h2>'+esc(z.name)+'</h2></div></div>'+standingsTable(zoneRows(c,z,c.currentStage===STAGES.ZONE_FINAL?STAGES.ZONE_FINAL:STAGES.GENERAL),true)+'</section>';}).join('')+'</div>':'<section class="card empty"><h2>Clasificación pendiente</h2><p>Primero creá al menos una zona y asigná equipos a ella. La clasificación aparecerá separada por zona.</p><button class="primary" data-view="zones">Ir a zonas</button></section>');}
   function teamsPage(){var c=category(),f=zoneFlow(c),rows=visibleRows(),hasZones=f.zones.some(function(z){return z.id!==f.secondStageZoneId;});return'<div class="toolbar"><div><h2>Equipos por zona</h2><p class="desc">Equipos de '+esc(c.name)+'</p></div>'+(hasZones?'<button class="primary" data-action="new-team">＋ Agregar equipo</button>':'')+'</div>'+(hasZones?'<section class="card" style="margin-top:16px"><p class="desc">Seleccioná una zona para asignar equipos. Un equipo sólo puede pertenecer a una zona en esta etapa.</p>'+standingsTable(rows)+'<form class="inline" data-form="team"><input name="name" required placeholder="Nombre del equipo"><button class="secondary">Guardar equipo</button></form></section>':'<section class="card empty" style="margin-top:16px"><h2>Primero creá una zona</h2><p>No se pueden cargar equipos antes de que exista al menos una zona.</p><button class="primary" data-view="zones">Crear zona</button></section>');}
-  function scoreForm(){var list=active(category().id);return'<form class="form score-form" data-form="score"><div class="form-grid"><div>'+picker()+'</div><label>Equipo<select name="teamId" required>'+list.map(function(t){return'<option value="'+t.id+'">'+esc(t.name)+'</option>';}).join('')+'</select></label></div><label>Puntaje anotado<input name="points" type="number" min="0" step="1" required placeholder="Ej: 20"></label><button class="primary">Guardar carga</button></form>';}
-  function matchForm(){var c=category(),list=active(c.id),options=list.map(function(t){var z=teamZone(c,t.id);return'<option value="'+t.id+'">'+esc(t.name)+(z?' · '+esc(z.name):'')+'</option>';}).join(''),f=zoneFlow(c),zones=c.currentStage===STAGES.GENERAL?f.zones.filter(function(z){return z.id!==f.secondStageZoneId;}):[zoneById(c,f.secondStageZoneId)];return'<form class="form match-form" data-form="match"><div class="form-grid">'+(zones.length?'<label>Zona<select name="zoneId" required>'+zones.map(function(z){return z?'<option value="'+z.id+'">'+esc(z.name)+'</option>':'';}).join('')+'</select></label>':'')+'<div>'+picker()+'</div><label>Equipo 1<select name="teamAId" required>'+options+'</select></label><label>Sets ganados equipo 1<input name="setsA" type="number" min="0" max="2" step="1" required placeholder="Ej: 2"></label><label>Equipo 2<select name="teamBId" required>'+options+'</select></label><label>Sets ganados equipo 2<input name="setsB" type="number" min="0" max="2" step="1" required placeholder="Ej: 1"></label></div><div class="set-scores"><p><strong>Marcadores reales por set</strong> — cargá sólo los sets disputados.</p><div class="form-grid"><label>Set 1 · Equipo 1<input name="set1A" type="number" min="0" step="1" required placeholder="15"></label><label>Set 1 · Equipo 2<input name="set1B" type="number" min="0" step="1" required placeholder="6"></label><label>Set 2 · Equipo 1<input name="set2A" type="number" min="0" step="1" required placeholder="8"></label><label>Set 2 · Equipo 2<input name="set2B" type="number" min="0" step="1" required placeholder="15"></label><label>Set 3 · Equipo 1<input name="set3A" type="number" min="0" step="1" placeholder="15"></label><label>Set 3 · Equipo 2<input name="set3B" type="number" min="0" step="1" placeholder="12"></label></div></div><p class="desc">Cada marcador debe ser entero y no puede terminar empatado. Los puntos a favor y en contra se derivan automáticamente de estos sets.</p><button class="primary">Registrar resultado de sets</button></form>';}
-  function quickLoader(){var list=active(category().id);return'<form class="quick-loader" data-form="quick-scores"><div class="quick-head"><div><p class="eyebrow">CARGA RÁPIDA</p><h2>Planilla completa</h2></div><span class="desc">Cada campo genera una nueva carga.</span></div><div class="quick-table"><div class="quick-row quick-labels"><span>Equipo</span><span>Puntaje</span></div>'+list.map(function(t){return'<label class="quick-row"><strong>'+esc(t.name)+'</strong><input name="quick-points" data-team-id="'+t.id+'" type="number" min="0" step="1" placeholder="—"></label>';}).join('')+'</div><button class="primary">Guardar puntajes</button></form>';}
-  function scoreHistory(){var entries=categoryEntries(category().id).slice().reverse();return'<section class="card"><div class="card-title"><div><p class="eyebrow">HISTORIAL</p><h2>Cargas realizadas</h2></div></div>'+(entries.length?'<div>'+entries.map(function(item,index){return'<div class="recent-item"><span class="avatar">'+initial(item.team.name)+'</span><span><b>'+esc(item.team.name)+'</b><small>+'+item.entry.points+' puntos · Carga '+(entries.length-index)+'</small></span><button class="link danger" data-action="delete-score" data-team-id="'+item.team.id+'" data-entry-id="'+item.entry.id+'">Eliminar</button></div>';}).join('')+'</div>':'<div class="empty"><p>No hay cargas todavía.</p></div>')+'</section>';}
-  function matchHistory(){var matches=categoryMatches(category().id).slice().reverse();return'<section class="card"><div class="card-title"><div><p class="eyebrow">HISTORIAL INDEPENDIENTE</p><h2>Resultados tradicionales</h2><p class="desc">Los resultados antiguos sin marcadores conservan sus puntos tradicionales, pero no aportan puntos a favor/en contra.</p></div></div>'+(matches.length?'<div>'+matches.map(function(r){var w=teamById(r.winnerId),l=teamById(r.loserId),p=resultPoints(r.score),sets=matchSetsFor(r);return'<div class="recent-item"><span class="avatar">✓</span><span><b>'+esc(w.name)+' '+r.score+' '+esc(l.name)+'</b><small>'+p.winner+'–'+p.loser+' puntos de clasificación · '+(sets.length?'Marcadores: '+sets.map(function(s){return s.a+'–'+s.b;}).join(', ')+' · ':'')+LABELS[r.stage]+'</small></span><button class="link" data-action="edit-match" data-id="'+r.id+'">Corregir</button><button class="link danger" data-action="delete-match" data-id="'+r.id+'">Eliminar</button></div>';}).join('')+'</div>':'<div class="empty"><p>No hay resultados tradicionales todavía.</p></div>')+'</section>';}
-  function resultsPage(){var c=category();return'<section class="card set-result-card"><div class="card-title"><div><p class="eyebrow">CARGAR RESULTADO</p><h2>Introducir resultado de set</h2><p class="desc">Ingresá los sets ganados por cada equipo. El sistema calcula automáticamente la clasificación 3–0, 2–1, 1–2 o 0–2.</p></div></div>'+(c.currentStage===STAGES.FINISHED?'<div class="empty"><p>El torneo finalizó.</p></div>':active(c.id).length>1?matchForm():'<div class="empty"><p>Se necesitan al menos dos equipos activos.</p></div>')+'</section><div class="two" style="margin-top:17px"><section class="card"><div class="card-title"><div><p class="eyebrow">CARGAR PUNTAJE</p><h2>Puntaje anotado</h2></div></div>'+(c.currentStage===STAGES.FINISHED?'<div class="empty"><p>El torneo finalizó.</p></div>':active(c.id).length?scoreForm():'<div class="empty"><p>No hay equipos activos.</p></div>')+'</section>'+scoreHistory()+'</div><section class="card quick-card"><div class="quick-category">'+picker()+'</div>'+(c.currentStage===STAGES.FINISHED?'<div class="empty"><p>El torneo finalizó.</p></div>':active(c.id).length?quickLoader():'<div class="empty"><p>No hay equipos para cargar.</p></div>')+'</section><div style="margin-top:17px">'+matchHistory()+'</div>';}
+  function categoryMatchups(c){
+    if(!c)return[];
+    var f=zoneFlow(c),zones=c.currentStage===STAGES.ZONE_FINAL?[zoneById(c,f.secondStageZoneId)].filter(Boolean):f.zones.filter(function(z){return z.id!==f.secondStageZoneId;}),stage=c.currentStage===STAGES.ZONE_FINAL?STAGES.ZONE_FINAL:STAGES.GENERAL,existing=categoryMatches(c.id),list=[];
+    zones.forEach(function(z){
+      var ids=z.teamIds.filter(function(id){return Boolean(teamById(id));});
+      for(var i=0;i<ids.length;i+=1){
+        for(var j=i+1;j<ids.length;j+=1){
+          var a=teamById(ids[i]),b=teamById(ids[j]);
+          var found=existing.filter(function(m){return m.stage===stage&&m.zoneId===z.id&&((m.winnerId===a.id&&m.loserId===b.id)||(m.winnerId===b.id&&m.loserId===a.id));})[0]||null;
+          list.push({key:z.id+'|'+a.id+'|'+b.id,zone:z,zoneId:z.id,teamA:a,teamB:b,match:found,status:found?'loaded':'pending'});
+        }
+      }
+    });
+    return list;
+  }
+  function initLoaderDraft(c){
+    var matchups=categoryMatchups(c),pending=matchups.filter(function(m){return m.status==='pending';});
+    if(pending.length){
+      var first=pending[0];
+      return{categoryId:c.id,mode:'fixture',fixtureKey:first.key,editMatchId:null,zoneId:first.zoneId,teamAId:first.teamA.id,teamBId:first.teamB.id,s1A:'',s1B:'',s2A:'',s2B:'',s3A:'',s3B:'',historyOpen:false};
+    }
+    var f=zoneFlow(c),zones=c.currentStage===STAGES.ZONE_FINAL?[zoneById(c,f.secondStageZoneId)].filter(Boolean):f.zones.filter(function(z){return z.id!==f.secondStageZoneId;}),z=zones[0]||null;
+    var pool=z&&z.teamIds.length?z.teamIds.map(teamById).filter(Boolean):active(c.id);
+    var t1=pool[0]?pool[0].id:'',t2=pool[1]?pool[1].id:(pool[0]?pool[0].id:'');
+    return{categoryId:c.id,mode:'manual',fixtureKey:'MANUAL',editMatchId:null,zoneId:z?z.id:'',teamAId:t1,teamBId:t2,s1A:'',s1B:'',s2A:'',s2B:'',s3A:'',s3B:'',historyOpen:false};
+  }
+  function ensureLoaderDraft(c){
+    if(!c)return null;
+    if(!loaderDraft||loaderDraft.categoryId!==c.id){loaderDraft=initLoaderDraft(c);}
+    return loaderDraft;
+  }
+  function parseSetField(raw){
+    var str=String(raw==null?'':raw).trim();
+    if(str==='')return{empty:true,valid:false,value:null};
+    var num=Number(str);
+    if(!/^\d+$/.test(str)||!Number.isInteger(num)||num<0)return{empty:false,valid:false,error:'Ingresá un entero mayor o igual a 0.',value:null};
+    return{empty:false,valid:true,value:num};
+  }
+  function evaluateSetRow(rawA,rawB,required){
+    var a=parseSetField(rawA),b=parseSetField(rawB);
+    if(a.empty&&b.empty)return{empty:true,complete:false,valid:!required,error:required?'Completá ambos marcadores del set.':null,winner:null,a:null,b:null};
+    if(!a.empty&&!a.valid)return{empty:false,complete:false,valid:false,error:a.error,winner:null,a:null,b:null,invalidSide:'A'};
+    if(!b.empty&&!b.valid)return{empty:false,complete:false,valid:false,error:b.error,winner:null,a:null,b:null,invalidSide:'B'};
+    if(a.empty||b.empty)return{empty:false,complete:false,valid:false,error:'Completá el marcador de ambos equipos.',winner:null,a:a.value,b:b.value};
+    if(a.value===b.value)return{empty:false,complete:true,valid:false,error:'El set no puede terminar empatado.',winner:null,a:a.value,b:b.value,tied:true};
+    return{empty:false,complete:true,valid:true,error:null,winner:a.value>b.value?'A':'B',a:a.value,b:b.value};
+  }
+  function evaluateScoreboard(c,draft){
+    var teamA=teamById(draft.teamAId),teamB=teamById(draft.teamBId),teamError=null;
+    if(!teamA||!teamB)teamError='Seleccioná ambos equipos.';
+    else if(teamA.id===teamB.id)teamError='Elegí dos equipos distintos.';
+    else if(c&&c.currentStage===STAGES.GENERAL&&draft.zoneId){
+      var z=zoneById(c,draft.zoneId);
+      if(z&&(z.teamIds.indexOf(teamA.id)<0||z.teamIds.indexOf(teamB.id)<0))teamError='Ambos equipos deben pertenecer a '+z.name+'.';
+    }
+    if(!teamError&&c&&!draft.editMatchId){
+      var stage=c.currentStage===STAGES.ZONE_FINAL?STAGES.ZONE_FINAL:STAGES.GENERAL;
+      var dup=categoryMatches(c.id).some(function(r){return r.stage===stage&&r.zoneId===(draft.zoneId||null)&&((r.winnerId===teamA.id&&r.loserId===teamB.id)||(r.winnerId===teamB.id&&r.loserId===teamA.id));});
+      if(dup)teamError='Este partido ya fue cargado. Elegilo en “Últimas cargas” para editarlo.';
+    }
+    var s1=evaluateSetRow(draft.s1A,draft.s1B,false);
+    var s2=evaluateSetRow(draft.s2A,draft.s2B,false);
+    var winsA=(s1.winner==='A'?1:0)+(s2.winner==='A'?1:0);
+    var winsB=(s1.winner==='B'?1:0)+(s2.winner==='B'?1:0);
+    var needsSet3=s1.valid&&s2.valid&&winsA===1&&winsB===1;
+    var s3=needsSet3?evaluateSetRow(draft.s3A,draft.s3B,false):{empty:true,complete:false,valid:true,error:null,winner:null,a:null,b:null};
+    if(needsSet3&&s3.winner){if(s3.winner==='A')winsA+=1;else winsB+=1;}
+    var hasAnyInput=!s1.empty||!s2.empty||(needsSet3&&!s3.empty);
+    var ready=(winsA===2||winsB===2)&&!teamError&&s1.valid&&s2.valid&&(!needsSet3||s3.valid);
+    var status=draft.editMatchId?'loaded':(ready?'loaded':(hasAnyInput?'in-progress':'pending'));
+    var statusLabel=draft.editMatchId?'Editando carga':(ready?'Listo para guardar':(hasAnyInput?'En curso':'Pendiente'));
+    var previewText='Ingresá los puntos de Set 1 y Set 2 para calcular el ganador.';
+    if(teamError)previewText=teamError;
+    else if(ready){
+      var winnerName=winsA>winsB?(teamA?teamA.name:'Equipo 1'):(teamB?teamB.name:'Equipo 2');
+      previewText=winnerName+' gana '+Math.max(winsA,winsB)+' – '+Math.min(winsA,winsB);
+    }else if(needsSet3){
+      previewText='Empate 1 – 1 en sets · Cargá el Set 3 para definir el ganador.';
+    }else if(hasAnyInput){
+      previewText='Marcador parcial en sets: '+(teamA?teamA.name:'Equipo 1')+' '+winsA+' – '+winsB+' '+(teamB?teamB.name:'Equipo 2');
+    }
+    var sets=[];
+    if(s1.valid)sets.push({a:s1.a,b:s1.b});
+    if(s2.valid)sets.push({a:s2.a,b:s2.b});
+    if(needsSet3&&s3.valid)sets.push({a:s3.a,b:s3.b});
+    return{teamA:teamA,teamB:teamB,teamError:teamError,s1:s1,s2:s2,s3:s3,winsA:winsA,winsB:winsB,needsSet3:needsSet3,ready:ready,status:status,statusLabel:statusLabel,previewText:previewText,sets:sets};
+  }
+  function saveScoreboardMatch(c,draft){
+    var evalState=evaluateScoreboard(c,draft);
+    if(!evalState.ready)throw Error(evalState.teamError||evalState.s1.error||evalState.s2.error||evalState.s3.error||'Completá los sets disputados antes de guardar.');
+    var teamAWins=evalState.winsA>evalState.winsB;
+    var winnerId=teamAWins?evalState.teamA.id:evalState.teamB.id;
+    var loserId=teamAWins?evalState.teamB.id:evalState.teamA.id;
+    var score=Math.max(evalState.winsA,evalState.winsB)+'-'+Math.min(evalState.winsA,evalState.winsB);
+    var oriented=evalState.sets.map(function(s){return teamAWins?{a:s.a,b:s.b}:{a:s.b,b:s.a};});
+    if(draft.editMatchId){
+      var existing=state.matchResults.filter(function(r){return r.id===draft.editMatchId;})[0];
+      if(!existing)throw Error('El partido a editar ya no existe.');
+      var snapshot=JSON.parse(JSON.stringify(existing));
+      existing.winnerId=winnerId;
+      existing.loserId=loserId;
+      existing.score=score;
+      existing.sets=validateMatchSets(oriented);
+      if(!saveState()){Object.assign(existing,snapshot);throw Error('No se pudo guardar la edición.');}
+      toastState={kind:'update',matchId:existing.id,snapshot:snapshot,text:teamById(winnerId).name+' '+score.replace('-','–')+' '+teamById(loserId).name+' actualizado'};
+      loaderDraft=initLoaderDraft(c);
+      return existing;
+    }
+    createMatchFromSets(evalState.teamA.id,evalState.winsA,evalState.teamB.id,evalState.winsB,evalState.sets,draft.zoneId||undefined);
+    var created=state.matchResults[state.matchResults.length-1];
+    toastState={kind:'create',matchId:created.id,text:teamById(created.winnerId).name+' '+created.score.replace('-','–')+' '+teamById(created.loserId).name+' guardado'};
+    loaderDraft=initLoaderDraft(c);
+    return created;
+  }
+  function resultsPage(){
+    var c=category();
+    if(!c)return'<section class="card empty"><h2>Seleccioná una categoría</h2></section>';
+    if(c.currentStage===STAGES.FINISHED)return'<section class="card empty"><h2>El torneo finalizó</h2><p>Ya no se pueden cargar nuevos resultados en esta categoría.</p></section>';
+    var list=active(c.id);
+    if(list.length<2)return'<section class="card empty"><h2>Se necesitan al menos dos equipos activos</h2><p>Agregá equipos y asignalos a una zona para cargar partidos.</p></section>';
+    var draft=ensureLoaderDraft(c),matchups=categoryMatchups(c),pending=matchups.filter(function(m){return m.status==='pending';}),loaded=matchups.filter(function(m){return m.status==='loaded';});
+    var f=zoneFlow(c),zones=c.currentStage===STAGES.ZONE_FINAL?[zoneById(c,f.secondStageZoneId)].filter(Boolean):f.zones.filter(function(z){return z.id!==f.secondStageZoneId;});
+    var currentZone=draft.zoneId?zoneById(c,draft.zoneId):(zones[0]||null);
+    var zoneTeamsList=currentZone&&currentZone.teamIds.length?currentZone.teamIds.map(teamById).filter(Boolean):list;
+    var evalState=evaluateScoreboard(c,draft);
+    var recentMatches=categoryMatches(c.id).slice().reverse();
+    var showManualSelectors=draft.mode==='manual'||!pending.length||Boolean(draft.editMatchId);
+    return(toastState?'<div class="toast-undo" role="status" aria-live="polite"><span>✓ <strong>'+esc(toastState.text)+'</strong></span><div class="toast-actions"><button type="button" class="toast-undo-btn" data-action="undo-last-match" data-id="'+esc(toastState.matchId)+'">Deshacer</button><button type="button" class="toast-close-btn" data-action="dismiss-toast" aria-label="Cerrar aviso">✕</button></div></div>':'')+
+      '<section class="card result-loader-card"><form class="scoreboard-form" data-form="scoreboard-match" novalidate>'+
+      '<div class="loader-top-grid">'+
+      '<div class="loader-field">'+picker()+'</div>'+
+      '<div class="loader-field loader-match-field"><div class="label-with-badge"><span>Partido</span><span class="match-status-pill '+evalState.status+'" id="live-match-status">'+esc(evalState.statusLabel)+'</span></div>'+
+      '<select id="match-selector" name="fixtureKey" data-action="select-matchup">'+
+      (pending.length?'<optgroup label="Partidos pendientes ('+pending.length+')">'+pending.map(function(m){
+        return'<option value="'+esc(m.key)+'" '+(draft.mode==='fixture'&&draft.fixtureKey===m.key?'selected':'')+'>'+esc(m.zone.name+' · '+m.teamA.name+' vs '+m.teamB.name+' (pendiente)')+'</option>';
+      }).join('')+'</optgroup>':'')+
+      '<option value="MANUAL" '+(draft.mode==='manual'?'selected':'')+'>'+(pending.length?'Elegir zona y equipos manualmente…':'Sin fixture pendiente · Elegir zona y equipos a mano')+'</option>'+
+      (loaded.length?'<optgroup label="Partidos cargados (seleccionar para editar)">'+loaded.map(function(m){
+        var w=teamById(m.match.winnerId),l=teamById(m.match.loserId);
+        return'<option value="EDIT:'+esc(m.match.id)+'" '+(draft.editMatchId===m.match.id?'selected':'')+'>'+esc(m.zone.name+' · '+(w?w.name:m.teamA.name)+' '+m.match.score.replace('-','–')+' '+(l?l.name:m.teamB.name)+' (cargado)')+'</option>';
+      }).join('')+'</optgroup>':'')+
+      '</select></div></div>'+
+      (showManualSelectors?'<div class="manual-selectors-bar">'+(zones.length?'<label class="loader-field">Zona<select name="zoneId" data-action="loader-zone">'+zones.map(function(z){return'<option value="'+z.id+'" '+(z.id===draft.zoneId?'selected':'')+'>'+esc(z.name)+'</option>';}).join('')+'</select></label>':'')+
+      '<label class="loader-field">Equipo 1<select name="teamAId" data-action="loader-team-a">'+zoneTeamsList.map(function(t){return'<option value="'+t.id+'" '+(t.id===draft.teamAId?'selected':'')+'>'+esc(t.name)+'</option>';}).join('')+'</select></label>'+
+      '<label class="loader-field">Equipo 2<select name="teamBId" data-action="loader-team-b">'+zoneTeamsList.map(function(t){return'<option value="'+t.id+'" '+(t.id===draft.teamBId?'selected':'')+' '+(t.id===draft.teamAId?'disabled':'')+'>'+esc(t.name)+(t.id===draft.teamAId?' (ya elegido)':'')+'</option>';}).join('')+'</select></label></div>':'')+
+      '<div class="field-error" id="team-error" '+(evalState.teamError?'':'hidden')+'>'+esc(evalState.teamError||'')+'</div>'+
+      '<div class="scoreboard" id="scoreboard-box">'+
+      '<div class="scoreboard-head">'+
+      '<div class="scoreboard-team team-a '+(evalState.winsA>evalState.winsB&&evalState.ready?'is-winner':'')+'"><small>'+(currentZone?esc(currentZone.name):'EQUIPO 1')+'</small><strong id="label-team-a">'+esc(evalState.teamA?evalState.teamA.name:'Equipo 1')+'</strong><span class="team-sets-badge" id="badge-sets-a">'+evalState.winsA+'</span></div>'+
+      '<div class="scoreboard-vs">SETS</div>'+
+      '<div class="scoreboard-team team-b '+(evalState.winsB>evalState.winsA&&evalState.ready?'is-winner':'')+'"><small>'+(currentZone?esc(currentZone.name):'EQUIPO 2')+'</small><strong id="label-team-b">'+esc(evalState.teamB?evalState.teamB.name:'Equipo 2')+'</strong><span class="team-sets-badge" id="badge-sets-b">'+evalState.winsB+'</span></div>'+
+      '</div>'+
+      [1,2,3].map(function(n){
+        var rowEval=evalState['s'+n],hiddenRow=n===3&&!evalState.needsSet3;
+        return'<div class="set-block" id="set-block-'+n+'" '+(hiddenRow?'hidden':'')+'>'+
+          '<div class="set-row '+(rowEval.winner==='A'?'win-a':rowEval.winner==='B'?'win-b':'')+' '+(rowEval.error&&!rowEval.empty?'has-error':'')+'" id="set-row-'+n+'">'+
+          '<div class="set-cell cell-a '+(rowEval.winner==='A'?'set-winner':'')+'"><input type="number" inputmode="numeric" min="0" step="1" name="s'+n+'A" data-set-input="s'+n+'A" value="'+esc(draft['s'+n+'A'])+'" placeholder="0" aria-label="Puntos Set '+n+' '+esc(evalState.teamA?evalState.teamA.name:'Equipo 1')+'"></div>'+
+          '<div class="set-label"><span>SET '+n+'</span>'+(n===3?'<small>Desempate</small>':'')+'</div>'+
+          '<div class="set-cell cell-b '+(rowEval.winner==='B'?'set-winner':'')+'"><input type="number" inputmode="numeric" min="0" step="1" name="s'+n+'B" data-set-input="s'+n+'B" value="'+esc(draft['s'+n+'B'])+'" placeholder="0" aria-label="Puntos Set '+n+' '+esc(evalState.teamB?evalState.teamB.name:'Equipo 2')+'"></div>'+
+          '</div>'+
+          '<div class="field-error" id="set-error-'+n+'" '+(rowEval.error&&!rowEval.empty?'':'hidden')+'>'+esc(rowEval.error||'')+'</div>'+
+          '</div>';
+      }).join('')+
+      '</div>'+
+      '<div class="live-preview-banner '+(evalState.ready?'is-ready':evalState.teamError?'is-error':'')+'" id="live-preview-banner" aria-live="polite">'+
+      '<span class="preview-kicker">RESULTADO CALCULADO</span>'+
+      '<strong id="live-preview-text">'+esc(evalState.previewText)+'</strong>'+
+      '</div>'+
+      '<div class="sticky-save-bar">'+
+      (draft.editMatchId?'<button type="button" class="cancel" data-action="cancel-edit-match">Cancelar edición</button>':'')+
+      '<button type="submit" class="primary save-result-btn" id="save-result-btn" '+(evalState.ready?'':'disabled')+'>'+(draft.editMatchId?'Guardar cambios del partido':'Guardar resultado')+'</button>'+
+      '</div></form></section>'+
+      '<details class="card recent-collapse" '+(draft.historyOpen?'open':'')+' data-action="toggle-history">'+
+      '<summary class="recent-collapse-summary"><div><span class="eyebrow">HISTORIAL RECIENTE</span><h2>Últimas cargas ('+recentMatches.length+')</h2></div><span class="collapse-chevron">▾</span></summary>'+
+      '<div class="recent-collapse-body">'+(recentMatches.length?recentMatches.slice(0,10).map(function(r){
+        var w=teamById(r.winnerId),l=teamById(r.loserId),z=r.zoneId?zoneById(c,r.zoneId):null,sets=matchSetsFor(r);
+        return'<div class="recent-item"><span class="match-status-pill loaded">Cargado</span><span><b>'+esc(w?w.name:'Equipo')+' '+r.score.replace('-','–')+' '+esc(l?l.name:'Equipo')+'</b><small>'+(z?esc(z.name)+' · ':'')+(sets.length?'Sets: '+sets.map(function(s){return s.a+'–'+s.b;}).join(', '):LABELS[r.stage])+'</small></span><div class="recent-actions"><button type="button" class="link" data-action="edit-match" data-id="'+r.id+'">Editar</button><button type="button" class="link danger" data-action="delete-match" data-id="'+r.id+'">Deshacer</button></div></div>';
+      }).join(''):'<p class="desc">Todavía no hay partidos cargados en esta categoría.</p>')+'</div></details>';
+  }
+  function syncScoreboardDOM(c){
+    var draft=ensureLoaderDraft(c);
+    if(!draft)return;
+    var evalState=evaluateScoreboard(c,draft);
+    var statusPill=document.getElementById('live-match-status');
+    if(statusPill){statusPill.className='match-status-pill '+evalState.status;statusPill.textContent=evalState.statusLabel;}
+    var teamErr=document.getElementById('team-error');
+    if(teamErr){teamErr.hidden=!evalState.teamError;teamErr.textContent=evalState.teamError||'';}
+    var badgeA=document.getElementById('badge-sets-a'),badgeB=document.getElementById('badge-sets-b');
+    if(badgeA)badgeA.textContent=String(evalState.winsA);
+    if(badgeB)badgeB.textContent=String(evalState.winsB);
+    var headTeams=app.querySelectorAll('.scoreboard-team');
+    if(headTeams[0])headTeams[0].classList.toggle('is-winner',evalState.ready&&evalState.winsA>evalState.winsB);
+    if(headTeams[1])headTeams[1].classList.toggle('is-winner',evalState.ready&&evalState.winsB>evalState.winsA);
+    [1,2,3].forEach(function(n){
+      var block=document.getElementById('set-block-'+n),row=document.getElementById('set-row-'+n),err=document.getElementById('set-error-'+n),rowEval=evalState['s'+n];
+      if(block){
+        var wasHidden=block.hidden;
+        block.hidden=(n===3&&!evalState.needsSet3);
+        if(n===3&&!wasHidden&&block.hidden){draft.s3A='';draft.s3B='';var i3a=block.querySelector('[name="s3A"]'),i3b=block.querySelector('[name="s3B"]');if(i3a)i3a.value='';if(i3b)i3b.value='';}
+      }
+      if(row){
+        row.className='set-row '+(rowEval.winner==='A'?'win-a':rowEval.winner==='B'?'win-b':'')+' '+(rowEval.error&&!rowEval.empty?'has-error':'');
+        var cellA=row.querySelector('.cell-a'),cellB=row.querySelector('.cell-b');
+        if(cellA)cellA.classList.toggle('set-winner',rowEval.winner==='A');
+        if(cellB)cellB.classList.toggle('set-winner',rowEval.winner==='B');
+      }
+      if(err){
+        var showErr=Boolean(rowEval.error&&!rowEval.empty);
+        err.hidden=!showErr;
+        err.textContent=showErr?rowEval.error:'';
+      }
+    });
+    var banner=document.getElementById('live-preview-banner'),previewText=document.getElementById('live-preview-text');
+    if(banner)banner.className='live-preview-banner '+(evalState.ready?'is-ready':evalState.teamError?'is-error':'');
+    if(previewText)previewText.textContent=evalState.previewText;
+    var saveBtn=document.getElementById('save-result-btn');
+    if(saveBtn)saveBtn.disabled=!evalState.ready;
+  }
   function teamHistory(team){var entries=team.scoreEntries.slice().reverse();return'<div class="modal-box team-history"><h2>'+esc(team.name)+'</h2><p class="desc">Puntos acumulados: <strong>'+calculateTeamTotal(team)+'</strong></p><h3>Historial</h3>'+(entries.length?'<div>'+entries.map(function(entry,index){return'<div class="recent-item"><span><b>'+(entries.length-index)+'. +'+entry.points+' puntos</b><small>'+new Date(entry.createdAt).toLocaleString('es-AR')+'</small></span><button type="button" class="link danger" data-action="delete-score" data-team-id="'+team.id+'" data-entry-id="'+entry.id+'">Eliminar</button></div>';}).join('')+'</div>':'<p class="desc">No hay cargas todavía.</p>')+'<div class="modal-actions"><button type="button" class="cancel" data-action="close">Cerrar</button></div></div>';}
   function stagePage(){var c=category(),rows=visibleRows(),action=c.currentStage===STAGES.FINAL?'<button class="primary" data-action="finish">Determinar campeón</button>':c.currentStage===STAGES.FINISHED?'':'<button class="primary" data-action="advance">'+({GENERAL:'Generar Top 16',TOP_16:'Generar Top 8',TOP_8:'Generar Top 4',TOP_4:'Avanzar a semifinales',SEMIFINAL:'Avanzar a final'})[c.currentStage]+' →</button>';return'<section class="card"><div class="stage-hero"><div><p class="eyebrow">ETAPA ACTUAL</p><h2>'+LABELS[c.currentStage]+'</h2><p>Los equipos avanzan según sus puntajes de la etapa.</p></div><div class="stage-count">'+(c.currentStage===STAGES.FINISHED?'✓':rows.length)+'<small>activos</small></div></div><div class="stage-action"><div><b>¿Terminaste de cargar esta etapa?</b><span>Los eliminados conservan sus cargas.</span></div>'+action+'</div></section><div style="margin-top:17px">'+table()+'</div>';}
   function categoryPage(){var c=category();return categoryHeader(c)+(view==='teams'?teamsPage():view==='zones'?zonesPage():view==='matches'?matchesPage():view==='positions'||view==='table'?positionsPage():view==='results'?resultsPage():stagePage());}
@@ -172,14 +384,31 @@
     app.querySelectorAll('[data-action="edit-category"]').forEach(function(e){e.onclick=function(){var c=state.categories.filter(function(x){return x.id===e.getAttribute('data-id');})[0],name=prompt('Nuevo nombre de categoría:',c?c.name:'');if(c&&name!==null)run(function(){editCategory(c.id,name);},'Categoría actualizada.');};});
     app.querySelectorAll('[data-action="delete-category"],[data-action="delete-active-category"]').forEach(function(e){e.onclick=function(){var c=state.categories.filter(function(x){return x.id===e.getAttribute('data-id');})[0];if(c)openDeleteCategory(c,e.getAttribute('data-action')==='delete-active-category'?'category':'categories');};});
     Array.prototype.slice.call(app.querySelectorAll('[data-action="delete-score"]')).concat(Array.prototype.slice.call(modal.querySelectorAll('[data-action="delete-score"]'))).forEach(function(e){e.onclick=function(){if(!confirm('¿Eliminar esta carga de puntaje?'))return;try{deleteScoreEntry(e.getAttribute('data-team-id'),e.getAttribute('data-entry-id'));if(modal.hidden){render();notice('Carga eliminada y total recalculado.',true);}else{var t=teamById(e.getAttribute('data-team-id'));openTeamHistory(t);}}catch(error){alert(error.message||'No se pudo eliminar la carga.');}};});
-    app.querySelectorAll('[data-action="delete-match"]').forEach(function(e){e.onclick=function(){var match=state.matchResults.filter(function(r){return r.id===e.getAttribute('data-id');})[0],warning=match&&match.stage===STAGES.GENERAL&&category().currentStage===STAGES.ZONE_FINAL?' Este resultado pertenece a la primera etapa y puede afectar a los clasificados de la zona única. ¿Continuar?':' ¿Eliminar este resultado tradicional?';if(confirm(warning)){run(function(){deleteMatchResult(e.getAttribute('data-id'));},'Resultado eliminado y clasificación recalculada.');}};});
-    app.querySelectorAll('[data-action="edit-match"]').forEach(function(e){e.onclick=function(){var match=state.matchResults.filter(function(r){return r.id===e.getAttribute('data-id');})[0];if(match&&match.stage===STAGES.GENERAL&&category().currentStage===STAGES.ZONE_FINAL&&!confirm('Este resultado pertenece a la primera etapa y puede afectar a los clasificados de la zona única. ¿Corregirlo de todos modos?'))return;var score=prompt('Resultado tradicional (2-0 o 2-1):',match?match.score:'2-0');if(score===null)return;var setText=prompt('Marcadores del ganador–rival separados por coma (ej: 15-6, 8-15, 15-12):',match&&match.sets&&match.sets.length?match.sets.map(function(s){return s.a+'-'+s.b;}).join(', '):'');if(setText===null)return;var sets=setText.trim()?setText.split(',').map(function(value){var pair=value.trim().split('-');return{a:pair[0],b:pair[1]};}):undefined;run(function(){updateMatchResult(e.getAttribute('data-id'),score.trim().replace('–','-'),sets);},'Resultado corregido y clasificación recalculada.');};});
+    app.querySelectorAll('[data-action="delete-match"]').forEach(function(e){e.onclick=function(){var matchId=e.getAttribute('data-id'),match=state.matchResults.filter(function(r){return r.id===matchId;})[0],warning=match&&match.stage===STAGES.GENERAL&&category().currentStage===STAGES.ZONE_FINAL?'Este resultado pertenece a la primera etapa y puede afectar a los clasificados de la zona única. ¿Continuar?':'¿Deshacer y eliminar este resultado?';if(confirm(warning)){if(toastState&&toastState.matchId===matchId)toastState=null;if(loaderDraft&&loaderDraft.editMatchId===matchId)loaderDraft=initLoaderDraft(category());run(function(){deleteMatchResult(matchId);},'Resultado deshecho y tabla de posiciones recalculada.');}};});
+    app.querySelectorAll('[data-action="edit-match"]').forEach(function(e){e.onclick=function(){var c=category(),match=state.matchResults.filter(function(r){return r.id===e.getAttribute('data-id');})[0];if(!c||!match)return;var sets=matchSetsFor(match);loaderDraft={categoryId:c.id,mode:'manual',fixtureKey:'EDIT:'+match.id,editMatchId:match.id,zoneId:match.zoneId||'',teamAId:match.winnerId,teamBId:match.loserId,s1A:sets[0]?String(sets[0].a):'',s1B:sets[0]?String(sets[0].b):'',s2A:sets[1]?String(sets[1].a):'',s2B:sets[1]?String(sets[1].b):'',s3A:sets[2]?String(sets[2].a):'',s3B:sets[2]?String(sets[2].b):'',historyOpen:true};view='results';render();var firstInput=app.querySelector('[data-set-input="s1A"]');if(firstInput)firstInput.focus();};});
+    app.querySelectorAll('[data-action="cancel-edit-match"]').forEach(function(e){e.onclick=function(){loaderDraft=initLoaderDraft(category());render();var sel=document.getElementById('match-selector');if(sel)sel.focus();};});
+    app.querySelectorAll('[data-action="undo-last-match"]').forEach(function(e){e.onclick=function(){if(!toastState)return;var currentToast=toastState;toastState=null;run(function(){if(currentToast.kind==='update'&&currentToast.snapshot){var target=state.matchResults.filter(function(r){return r.id===currentToast.matchId;})[0];if(target){Object.assign(target,currentToast.snapshot);saveState();}}else{deleteMatchResult(currentToast.matchId);}loaderDraft=initLoaderDraft(category());},'Carga deshecha y posiciones recalculadas.');var sel=document.getElementById('match-selector');if(sel)sel.focus();};});
+    app.querySelectorAll('[data-action="dismiss-toast"]').forEach(function(e){e.onclick=function(){toastState=null;render();};});
+    app.querySelectorAll('[data-action="toggle-history"]').forEach(function(e){e.ontoggle=function(){if(loaderDraft)loaderDraft.historyOpen=e.open;};});
+    app.querySelectorAll('[data-action="select-matchup"]').forEach(function(e){e.onchange=function(){var c=category(),val=e.value,draft=ensureLoaderDraft(c);if(val==='MANUAL'){var f=zoneFlow(c),zones=c.currentStage===STAGES.ZONE_FINAL?[zoneById(c,f.secondStageZoneId)].filter(Boolean):f.zones.filter(function(z){return z.id!==f.secondStageZoneId;}),z=draft.zoneId?zoneById(c,draft.zoneId):(zones[0]||null),pool=z&&z.teamIds.length?z.teamIds.map(teamById).filter(Boolean):active(c.id);draft.mode='manual';draft.fixtureKey='MANUAL';draft.editMatchId=null;draft.zoneId=z?z.id:'';draft.teamAId=pool[0]?pool[0].id:'';draft.teamBId=pool[1]?pool[1].id:(pool[0]?pool[0].id:'');draft.s1A='';draft.s1B='';draft.s2A='';draft.s2B='';draft.s3A='';draft.s3B='';}else if(val.indexOf('EDIT:')===0){var mId=val.slice(5),match=state.matchResults.filter(function(r){return r.id===mId;})[0];if(match){var sets=matchSetsFor(match);draft.mode='manual';draft.fixtureKey=val;draft.editMatchId=match.id;draft.zoneId=match.zoneId||'';draft.teamAId=match.winnerId;draft.teamBId=match.loserId;draft.s1A=sets[0]?String(sets[0].a):'';draft.s1B=sets[0]?String(sets[0].b):'';draft.s2A=sets[1]?String(sets[1].a):'';draft.s2B=sets[1]?String(sets[1].b):'';draft.s3A=sets[2]?String(sets[2].a):'';draft.s3B=sets[2]?String(sets[2].b):'';}}else{var parts=val.split('|');draft.mode='fixture';draft.fixtureKey=val;draft.editMatchId=null;draft.zoneId=parts[0]||'';draft.teamAId=parts[1]||'';draft.teamBId=parts[2]||'';draft.s1A='';draft.s1B='';draft.s2A='';draft.s2B='';draft.s3A='';draft.s3B='';}render();var s1=app.querySelector('[data-set-input="s1A"]');if(s1)s1.focus();};});
+    app.querySelectorAll('[data-action="loader-zone"]').forEach(function(e){e.onchange=function(){var c=category(),draft=ensureLoaderDraft(c),z=zoneById(c,e.value),pool=z&&z.teamIds.length?z.teamIds.map(teamById).filter(Boolean):active(c.id);draft.zoneId=e.value;draft.teamAId=pool[0]?pool[0].id:'';draft.teamBId=pool[1]?pool[1].id:(pool[0]?pool[0].id:'');render();};});
+    app.querySelectorAll('[data-action="loader-team-a"]').forEach(function(e){e.onchange=function(){var c=category(),draft=ensureLoaderDraft(c),z=draft.zoneId?zoneById(c,draft.zoneId):null,pool=z&&z.teamIds.length?z.teamIds.map(teamById).filter(Boolean):active(c.id);draft.teamAId=e.value;if(draft.teamBId===draft.teamAId){var alt=pool.filter(function(t){return t.id!==draft.teamAId;})[0];if(alt)draft.teamBId=alt.id;}render();};});
+    app.querySelectorAll('[data-action="loader-team-b"]').forEach(function(e){e.onchange=function(){var c=category(),draft=ensureLoaderDraft(c);draft.teamBId=e.value;render();};});
+    app.querySelectorAll('[data-set-input]').forEach(function(input){
+      input.oninput=function(){var c=category(),draft=ensureLoaderDraft(c),key=input.getAttribute('data-set-input');draft[key]=input.value;syncScoreboardDOM(c);};
+      input.onkeydown=function(ev){
+        if(ev.key!=='Enter')return;
+        ev.preventDefault();
+        var visibleInputs=Array.prototype.slice.call(app.querySelectorAll('[data-set-input]')).filter(function(el){return !el.closest('[hidden]');});
+        var idx=visibleInputs.indexOf(input);
+        if(idx>=0&&idx+1<visibleInputs.length){visibleInputs[idx+1].focus();visibleInputs[idx+1].select();}
+        else{var saveBtn=document.getElementById('save-result-btn');if(saveBtn&&!saveBtn.disabled){saveBtn.click();}}
+      };
+    });
+    app.querySelectorAll('[data-form="scoreboard-match"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();try{saveScoreboardMatch(category(),ensureLoaderDraft(category()));render();var sel=document.getElementById('match-selector');if(sel)sel.focus();}catch(error){notice(error.message||'No se pudo guardar el partido.');}};});
     app.querySelectorAll('[data-form="zone"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){createZone(new FormData(f).get('name'));},'Zona creada.');};});
     app.querySelectorAll('[data-form="assign-team"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){var d=new FormData(f);assignTeamToZone(d.get('teamId'),d.get('zoneId'));},'Equipo asignado a la zona.');};});
     app.querySelectorAll('[data-form="team"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){createTeam(new FormData(f).get('name'));},'Equipo guardado.');};});
-    app.querySelectorAll('[data-form="score"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){var d=new FormData(f);createScoreEntry(d.get('teamId'),d.get('points'));f.querySelector('[name="points"]').value='';},'Puntaje guardado.');};});
-    app.querySelectorAll('[data-form="match"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){var d=new FormData(f),sets=['1','2','3'].map(function(n){return{a:d.get('set'+n+'A'),b:d.get('set'+n+'B')};}).filter(function(set){return set.a!==''&&set.b!=='';});createMatchFromSets(d.get('teamAId'),d.get('setsA'),d.get('teamBId'),d.get('setsB'),sets,d.get('zoneId'));},'Resultado registrado y clasificación actualizada.');};});
-    app.querySelectorAll('[data-form="quick-scores"]').forEach(function(f){f.onsubmit=function(ev){ev.preventDefault();run(function(){return addQuickScores(Array.from(f.querySelectorAll('[data-team-id]')).map(function(input){return{teamId:input.getAttribute('data-team-id'),value:input.value};}));},function(count){return count+' carga'+(count===1?'':'s')+' guardada'+(count===1?'':'s')+'.';});};});
   }
   modal.onclick=function(e){if(e.target===modal||e.target.closest('[data-action="close"]')){closeModal();return;}var confirmButton=e.target.closest('[data-action="confirm-delete-category"]');if(confirmButton){var c=state.categories.filter(function(x){return x.id===confirmButton.getAttribute('data-id');})[0],name=c?c.name:'Categoría';deleteCategory(confirmButton.getAttribute('data-id'));closeModal();view=state.categories.length?(confirmButton.getAttribute('data-return-view')==='category'?'teams':'categories'):'home';render();notice(name+' eliminada correctamente.',true);}};
   modal.addEventListener('click',function(e){var button=e.target.closest('[data-action="confirm-zones"]');if(!button)return;try{confirmZones();closeModal();view='zones';render();notice('Primera etapa cerrada: se creó la zona única con dos clasificados por zona.',true);}catch(error){button.disabled=false;notice(error.message||'No se pudo confirmar la clasificación.');}});
