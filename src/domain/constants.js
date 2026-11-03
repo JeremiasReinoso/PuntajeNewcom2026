@@ -18,29 +18,22 @@
 
   /** Etapas persistidas en `category.currentStage`, `team.stage` y `match.stage`. */
   const STAGES = Object.freeze({
-    GENERAL: 'GENERAL', // Primera etapa (zonas iniciales).
-    TOP_16: 'TOP_16', // Legado: flujo eliminatorio anterior (sólo datos existentes).
-    TOP_8: 'TOP_8',
-    TOP_4: 'TOP_4',
-    SEMIFINAL: 'SEMIFINAL',
-    FINAL: 'FINAL',
-    ZONE_FINAL: 'ZONE_FINAL', // Zona única (segunda etapa o modalidad +60).
+    GENERAL: 'GENERAL', // Fase clasificatoria (zonas iniciales).
+    ZONE_FINAL: 'ZONE_FINAL', // Zona final (+50/+40) o zona única (+60).
     FINISHED: 'FINISHED'
   });
 
   const STAGE_LABELS = Object.freeze({
-    GENERAL: 'Primera etapa · zonas',
-    TOP_16: 'Top 16',
-    TOP_8: 'Top 8',
-    TOP_4: 'Top 4',
-    SEMIFINAL: 'Semifinales',
-    FINAL: 'Final',
-    ZONE_FINAL: 'Segunda etapa · zona única',
+    GENERAL: 'Fase clasificatoria',
+    ZONE_FINAL: 'Zona final',
     FINISHED: 'Finalizado'
   });
 
-  /** Etapas del flujo eliminatorio heredado. No se ofrecen para categorías nuevas. */
-  const LEGACY_KNOCKOUT_STAGES = Object.freeze(['TOP_16', 'TOP_8', 'TOP_4', 'SEMIFINAL', 'FINAL']);
+  /** Fase de cada zona (`clasificatoria` o `final`). */
+  const ZONE_PHASES = Object.freeze({
+    QUALIFYING: 'clasificatoria',
+    FINAL: 'final'
+  });
 
   const STATUS = Object.freeze({
     ACTIVE: 'ACTIVE',
@@ -74,14 +67,19 @@
 
   /**
    * Modalidades de competición.
-   * - ZONES: Modalidad A. Zonas iniciales → 2 clasificados por zona → zona única.
-   * - SINGLE_ZONE: Modalidad B (+60). Todos los equipos en una única zona.
+   * - ZONES_AND_FINAL / ZONES: Zonas clasificatorias → 2 clasificados por zona → Zona final (+50 y +40).
+   * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (+60).
    */
-  const FORMATS = Object.freeze({ ZONES: 'ZONES', SINGLE_ZONE: 'SINGLE_ZONE' });
+  const FORMATS = Object.freeze({
+    ZONES_AND_FINAL: 'zonas_y_final',
+    ROUND_ROBIN: 'todos_contra_todos',
+    ZONES: 'zonas_y_final',
+    SINGLE_ZONE: 'todos_contra_todos'
+  });
 
   const FORMAT_LABELS = Object.freeze({
-    ZONES: 'Zonas + zona única',
-    SINGLE_ZONE: 'Zona única · todos contra todos'
+    zonas_y_final: 'Zonas clasificatorias + Zona final',
+    todos_contra_todos: 'Todos contra todos (zona única)'
   });
 
   /** Estados de alto nivel que se muestran al usuario (derivados, nunca persistidos). */
@@ -92,32 +90,30 @@
     QUALIFIED: 'QUALIFIED',
     SINGLE_ZONE_IN_PROGRESS: 'SINGLE_ZONE_IN_PROGRESS',
     FINAL_AVAILABLE: 'FINAL_AVAILABLE',
-    LEGACY_KNOCKOUT: 'LEGACY_KNOCKOUT',
     FINISHED: 'FINISHED'
   });
 
   const PHASE_LABELS = Object.freeze({
     CONFIGURING: 'En configuración',
-    FIRST_STAGE_IN_PROGRESS: 'Etapa inicial en curso',
+    FIRST_STAGE_IN_PROGRESS: 'Fase clasificatoria en curso',
     QUALIFICATION_PENDING: 'Clasificación pendiente',
     QUALIFIED: 'Equipos clasificados',
-    SINGLE_ZONE_IN_PROGRESS: 'Zona única en curso',
-    FINAL_AVAILABLE: 'Clasificación final disponible',
-    LEGACY_KNOCKOUT: 'Etapa eliminatoria (datos anteriores)',
+    SINGLE_ZONE_IN_PROGRESS: 'Zona final en curso',
+    FINAL_AVAILABLE: 'Tabla final disponible',
     FINISHED: 'Finalizado'
   });
 
-  /** Cantidad de clasificados por zona inicial hacia la zona única. */
+  /** Cantidad de clasificados por zona inicial hacia la zona final. */
   const QUALIFIERS_PER_ZONE = 2;
 
-  /** Nombre por defecto de la zona única. */
+  /** Nombre por defecto de la zona única / zona final. */
   const SINGLE_ZONE_NAME = 'Zona única';
-  const SECOND_STAGE_ZONE_NAME = 'Zona única · Segunda etapa';
+  const SECOND_STAGE_ZONE_NAME = 'Zona final';
 
-  /** Las categorías cuyo nombre contiene "+60" usan la modalidad de zona única. */
+  /** Las categorías cuyo nombre contiene "+60" usan la modalidad todos contra todos. */
   const SINGLE_ZONE_CATEGORY_PATTERN = /\+\s*60(?!\d)/;
 
-  /** Motivo de archivo de un resultado de zona única cuando cambian los clasificados. */
+  /** Motivo de archivo de un resultado de zona final cuando cambian los clasificados. */
   const ARCHIVE_REASONS = Object.freeze({ QUALIFICATION_CHANGE: 'QUALIFICATION_CHANGE' });
 
   /** Versión del esquema persistido. Incrementar sólo junto con una migración. */
@@ -127,7 +123,7 @@
   return Object.freeze({
     STAGES,
     STAGE_LABELS,
-    LEGACY_KNOCKOUT_STAGES,
+    ZONE_PHASES,
     STATUS,
     STATUS_LABELS,
     ZONE_STATUS,

@@ -150,12 +150,14 @@
     function createCategory(name, format) {
       const trimmed = String(name || '').trim();
       ensure(trimmed, 'La categoría necesita un nombre.', 'CATEGORY_NAME_REQUIRED');
-      const chosen = format === FORMATS.ZONES || format === FORMATS.SINGLE_ZONE ? format : tournament.inferFormat(trimmed);
+      const chosen = format === FORMATS.ZONES_AND_FINAL || format === FORMATS.ROUND_ROBIN || format === 'ZONES' || format === 'SINGLE_ZONE'
+        ? (format === 'SINGLE_ZONE' || format === FORMATS.ROUND_ROBIN ? FORMATS.ROUND_ROBIN : FORMATS.ZONES_AND_FINAL)
+        : tournament.inferFormat(trimmed);
       return commit(function () {
         const category = { id: newId('cat'), name: trimmed, format: chosen, currentStage: STAGES.GENERAL, championId: null, runnerUpId: null, zoneTournament: tournament.emptyZoneTournament() };
-        if (chosen === FORMATS.SINGLE_ZONE) {
+        if (chosen === FORMATS.ROUND_ROBIN) {
           category.currentStage = STAGES.ZONE_FINAL;
-          category.zoneTournament = tournament.singleZoneTournament({ id: newId('zone'), name: constants.SINGLE_ZONE_NAME, teamIds: [] });
+          category.zoneTournament = tournament.singleZoneTournament({ id: newId('zone'), name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] });
         }
         state.categories.push(category);
         state.selectedCategoryId = category.id;
@@ -318,7 +320,7 @@
       ensure(!tournament.flow(category).zones.some(function (z) { return z.name.toLowerCase() === trimmed.toLowerCase(); }), 'Ya existe una zona con ese nombre.', 'DUPLICATE_ZONE');
       return commit(function () {
         const f = tournament.flow(categoryById(category.id));
-        const zone = { id: newId('zone'), name: trimmed, teamIds: [] };
+        const zone = { id: newId('zone'), name: trimmed, phase: constants.ZONE_PHASES.QUALIFYING, teamIds: [] };
         f.zones.push(zone);
         f.status = ZONE_STATUS.CONFIGURING;
         f.firstStageStatus = 'CONFIGURING';
@@ -403,7 +405,7 @@
         const c = categoryById(category.id);
         const f = tournament.flow(c);
         const qualifiedIds = result.qualifiers.map(function (q) { return q.teamId; });
-        const second = { id: newId('zone'), name: constants.SECOND_STAGE_ZONE_NAME, teamIds: qualifiedIds.slice() };
+        const second = { id: newId('zone'), name: constants.SECOND_STAGE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: qualifiedIds.slice() };
         f.qualified = result.qualifiers.map(function (q) { return Object.assign({}, q); });
         f.zones.push(second);
         f.secondStageZoneId = second.id;
@@ -526,22 +528,21 @@
     /**
      * Determina etapa y zona de un nuevo resultado.
      * - Primera etapa: zona inicial obligatoria.
-     * - Zona única: por defecto la zona única. En Modalidad A también se acepta
+     * - Zona final / única: por defecto la zona final/única. En Modalidad A también se acepta
      *   una zona inicial como CORRECCIÓN de la primera etapa.
-     * - Datos heredados sin zonas / etapas eliminatorias: etapa actual, sin zona.
      */
     function resolveTarget(category, zoneId) {
       const f = tournament.flow(category);
-      if (tournament.isLegacyKnockout(category) || !f.zones.length) return { stage: category.currentStage, zone: null, correction: false };
+      if (!f.zones.length) return { stage: category.currentStage, zone: null, correction: false };
       if (category.currentStage === STAGES.GENERAL) {
         const zone = zoneId ? tournament.zoneById(category, zoneId) : null;
         ensure(zone && tournament.isInitialZone(category, zone.id), 'Ambos equipos deben pertenecer a la misma zona.', 'ZONE_REQUIRED');
         return { stage: STAGES.GENERAL, zone, correction: false };
       }
       const target = zoneId ? tournament.zoneById(category, zoneId) : tournament.finalZone(category);
-      ensure(target, 'El resultado debe pertenecer a la zona única de la segunda etapa.', 'ZONE_REQUIRED');
+      ensure(target, 'El resultado debe pertenecer a la zona final.', 'ZONE_REQUIRED');
       if (target.id === f.secondStageZoneId) return { stage: STAGES.ZONE_FINAL, zone: target, correction: false };
-      ensure(!tournament.isSingleZoneFormat(category) && tournament.isInitialZone(category, target.id), 'El resultado debe pertenecer a la zona única de la segunda etapa.', 'ZONE_REQUIRED');
+      ensure(!tournament.isSingleZoneFormat(category) && tournament.isInitialZone(category, target.id), 'El resultado debe pertenecer a la zona final.', 'ZONE_REQUIRED');
       return { stage: STAGES.GENERAL, zone: target, correction: true };
     }
 
@@ -695,49 +696,6 @@
       return { affectsQualification: affects, before, after };
     }
 
-    // -------------------------------------------------------------------------
-    // Flujo eliminatorio heredado (sólo para categorías que ya estaban en él)
-    // -------------------------------------------------------------------------
-
-    function advance(target, limit) {
-      const category = requireCategory();
-      const list = activeTeams(category.id);
-      ensure(list.length >= 2, 'Se necesitan al menos 2 equipos activos.', 'NOT_ENOUGH_TEAMS');
-      return commit(function () {
-        const c = categoryById(category.id);
-        const activeIds = activeTeams(c.id).map(function (t) { return t.id; });
-        const keep = standings(c.id, c.currentStage).filter(function (row) { return activeIds.indexOf(row.team.id) >= 0; })
-          .slice(0, Math.min(limit, activeIds.length)).map(function (row) { return row.team.id; });
-        activeTeams(c.id).forEach(function (t) {
-          if (keep.indexOf(t.id) >= 0) { t.status = STATUS.QUALIFIED; t.stage = target; } else t.status = STATUS.ELIMINATED;
-        });
-        c.currentStage = target;
-      });
-    }
-    function requireStage(stage, message) {
-      const category = selectedCategory();
-      ensure(category && category.currentStage === stage, message, 'WRONG_STAGE');
-    }
-    function generateTop16() { requireStage(STAGES.GENERAL, 'La etapa actual no es clasificación general.'); requireZonesFormat(selectedCategory()); return advance(STAGES.TOP_16, 16); }
-    function generateTop8() { requireStage(STAGES.TOP_16, 'La etapa actual no es Top 16.'); return advance(STAGES.TOP_8, 8); }
-    function generateTop4() { requireStage(STAGES.TOP_8, 'La etapa actual no es Top 8.'); return advance(STAGES.TOP_4, 4); }
-    function advanceToSemifinals() { requireStage(STAGES.TOP_4, 'La etapa actual no es Top 4.'); return advance(STAGES.SEMIFINAL, 4); }
-    function advanceToFinal() { requireStage(STAGES.SEMIFINAL, 'La etapa actual no es semifinales.'); return advance(STAGES.FINAL, 2); }
-    function finishTournament() {
-      requireStage(STAGES.FINAL, 'La categoría no está en la final.');
-      const category = selectedCategory();
-      const rows = standings(category.id, STAGES.FINAL).filter(function (r) { return r.team.status === STATUS.ACTIVE || r.team.status === STATUS.QUALIFIED; });
-      ensure(rows.length >= 2 && rows[0].stagePoints && rows[1].stagePoints, 'Cargá un puntaje para cada finalista.', 'FINAL_INCOMPLETE');
-      return commit(function () {
-        const c = categoryById(category.id);
-        c.championId = rows[0].team.id;
-        c.runnerUpId = rows[1].team.id;
-        c.currentStage = STAGES.FINISHED;
-        teamById(rows[0].team.id).status = STATUS.CHAMPION;
-        teamById(rows[1].team.id).status = STATUS.RUNNER_UP;
-      });
-    }
-
     return Object.freeze({
       // consultas
       getState, rawState, categoryById, selectedCategory, teamsOf, teamById, matchById, matchesOf, activeTeams,
@@ -753,8 +711,6 @@
       confirmZones, reconcileQualifiers, resolveTie, clearTieResolution,
       // resultados
       createMatchResult, createMatchFromSets, updateMatchResult, updateMatchFromSets, deleteMatchResult,
-      // heredado
-      generateTop16, generateTop8, generateTop4, advanceToSemifinals, advanceToFinal, finishTournament,
       // persistencia
       reload: function () { state = repository.load(); return getState(); },
       save: function () { return repository.save(state); }

@@ -61,12 +61,18 @@
 
   function normalizeZoneTournament(source, teamIds) {
     const raw = source || {};
+    const secondStageId = typeof raw.secondStageZoneId === 'string' ? raw.secondStageZoneId : null;
     const zones = Array.isArray(raw.zones) ? raw.zones.filter(function (zone) {
       return zone && isNonEmptyString(zone.id) && isNonEmptyString(zone.name);
     }).map(function (zone) {
-      return { id: zone.id, name: zone.name.trim(), teamIds: Array.isArray(zone.teamIds) ? zone.teamIds.filter(function (id) { return teamIds[id]; }) : [] };
+      const isFinalPhase = zone.phase === constants.ZONE_PHASES.FINAL || (secondStageId && zone.id === secondStageId);
+      return {
+        id: zone.id,
+        name: zone.name.trim(),
+        phase: isFinalPhase ? constants.ZONE_PHASES.FINAL : constants.ZONE_PHASES.QUALIFYING,
+        teamIds: Array.isArray(zone.teamIds) ? zone.teamIds.filter(function (id) { return teamIds[id]; }) : []
+      };
     }) : [];
-    const secondStageId = typeof raw.secondStageZoneId === 'string' ? raw.secondStageZoneId : null;
     return {
       status: isOneOf(ZONE_STATUS, raw.status) ? raw.status : (zones.length ? ZONE_STATUS.IN_PROGRESS : ZONE_STATUS.CONFIGURING),
       firstStageStatus: raw.firstStageStatus === 'SKIPPED' ? 'SKIPPED' : (raw.firstStageStatus === 'FINISHED' || secondStageId ? 'FINISHED' : (raw.firstStageStatus || 'CONFIGURING')),
@@ -156,10 +162,13 @@
     }).map(normalizeMatch);
 
     const normalizedCategories = categories.map(function (c) {
+      let fmt = null;
+      if (c.format === FORMATS.ROUND_ROBIN || c.format === 'SINGLE_ZONE') fmt = FORMATS.ROUND_ROBIN;
+      else if (c.format === FORMATS.ZONES_AND_FINAL || c.format === 'ZONES') fmt = FORMATS.ZONES_AND_FINAL;
       const category = {
         id: c.id,
         name: c.name.trim(),
-        format: isOneOf(FORMATS, c.format) ? c.format : null,
+        format: fmt,
         currentStage: isOneOf(STAGES, c.currentStage) ? c.currentStage : STAGES.GENERAL,
         championId: typeof c.championId === 'string' ? c.championId : null,
         runnerUpId: typeof c.runnerUpId === 'string' ? c.runnerUpId : null,

@@ -66,11 +66,7 @@
 
   /** Sugiere la modalidad según el nombre (las categorías "+60" usan zona única). */
   function inferFormat(name) {
-    return constants.SINGLE_ZONE_CATEGORY_PATTERN.test(String(name || '')) ? FORMATS.SINGLE_ZONE : FORMATS.ZONES;
-  }
-
-  function isLegacyKnockout(category) {
-    return Boolean(category) && constants.LEGACY_KNOCKOUT_STAGES.indexOf(category.currentStage) >= 0;
+    return constants.SINGLE_ZONE_CATEGORY_PATTERN.test(String(name || '')) ? FORMATS.ROUND_ROBIN : FORMATS.ZONES_AND_FINAL;
   }
 
   function zoneById(category, zoneId) {
@@ -276,7 +272,6 @@
     const category = ctx.category;
     let code;
     if (category.currentStage === STAGES.FINISHED) code = PHASES.FINISHED;
-    else if (isLegacyKnockout(category)) code = PHASES.LEGACY_KNOCKOUT;
     else if (category.currentStage === STAGES.ZONE_FINAL) {
       code = finalClassification(ctx).definitive ? PHASES.FINAL_AVAILABLE : PHASES.SINGLE_ZONE_IN_PROGRESS;
     } else if (!initialZones(category).length) code = PHASES.CONFIGURING;
@@ -308,7 +303,8 @@
     // Con una sola zona existente se reutiliza (conserva id, nombre y resultados).
     const target = zones.length === 1
       ? zones[0]
-      : { id: deps.newId('zone'), name: constants.SINGLE_ZONE_NAME, teamIds: [] };
+      : { id: deps.newId('zone'), name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] };
+    target.phase = constants.ZONE_PHASES.FINAL;
     target.teamIds = teams.map(function (team) { return team.id; });
     matches.forEach(function (match) {
       if (match.stage !== STAGES.GENERAL) return;
@@ -321,7 +317,7 @@
       if (team.status === STATUS.ELIMINATED) team.status = STATUS.ACTIVE;
     });
     const previous = flow(category);
-    category.format = FORMATS.SINGLE_ZONE;
+    category.format = FORMATS.ROUND_ROBIN;
     category.currentStage = STAGES.ZONE_FINAL;
     category.zoneTournament = Object.assign(singleZoneTournament(target), {
       tieBreaks: (previous.tieBreaks || []).filter(function (item) { return item.scope.indexOf(STAGES.ZONE_FINAL + '|') === 0; })
@@ -335,7 +331,6 @@
     flow,
     isSingleZoneFormat,
     inferFormat,
-    isLegacyKnockout,
     zoneById,
     initialZones,
     finalZone,
