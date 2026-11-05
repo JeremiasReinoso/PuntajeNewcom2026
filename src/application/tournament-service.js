@@ -145,7 +145,7 @@
 
     /**
      * Crea una categoría. Si no se indica modalidad se infiere del nombre
-     * ("+60" → zona única; resto → zonas + zona única).
+     * ("+60"/"+68" → zona única; resto → zonas + zona única).
      */
     function createCategory(name, format) {
       const trimmed = String(name || '').trim();
@@ -201,7 +201,7 @@
 
     /**
      * Registra un equipo en la categoría seleccionada.
-     * En zona única (+60) se incorpora automáticamente a la única zona.
+     * En zona única (+60/+68) se incorpora automáticamente a la única zona.
      * @param {string} name
      * @param {string} [zoneId] Zona inicial opcional donde asignarlo (Modalidad A).
      */

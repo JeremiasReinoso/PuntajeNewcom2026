@@ -6,7 +6,7 @@
  *  - Completar campos nuevos con valores por defecto compatibles.
  *  - Migración v1 → v2:
  *      · Agrega `category.format` (ZONES | SINGLE_ZONE).
- *      · Las categorías "+60" en primera etapa con 0 o 1 zona se convierten
+ *      · Las categorías "+60" y "+68" en primera etapa con 0 o 1 zona se convierten
  *        automáticamente a zona única SIN perder datos (ver
  *        `tournament.convertCategoryToSingleZone`). Si la conversión no es
  *        inequívoca (varias zonas o etapa avanzada) se mantienen como ZONES y la
@@ -113,7 +113,7 @@
     return normalized;
   }
 
-  /** ¿Puede convertirse automáticamente una categoría +60 sin ambigüedad? */
+  /** ¿Puede convertirse automáticamente una categoría +60/+68 sin ambigüedad? */
   function canAutoMigrateToSingleZone(category) {
     return tournament.inferFormat(category.name) === FORMATS.SINGLE_ZONE &&
       category.currentStage === STAGES.GENERAL &&

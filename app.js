@@ -3,7 +3,7 @@
   var STAGES={GENERAL:'GENERAL',ZONE_FINAL:'ZONE_FINAL',FINISHED:'FINISHED'},
       LABELS={GENERAL:'Fase clasificatoria · Zonas',ZONE_FINAL:'Fase final · Zona final',FINISHED:'Torneo finalizado'},
       FORMATS={ZONES_AND_FINAL:'zonas_y_final',ROUND_ROBIN:'todos_contra_todos'},
-      FORMAT_LABELS={zonas_y_final:'Zonas + Zona final (+40 / +50)',todos_contra_todos:'Todos contra todos · Zona única (+60)'},
+      FORMAT_LABELS={zonas_y_final:'Zonas + Zona final (+40 / +50)',todos_contra_todos:'Todos contra todos · Zona única (+60 / +68)'},
       ZONE_PHASES={QUALIFYING:'clasificatoria',FINAL:'final'},
       ZONE_PHASE_LABELS={clasificatoria:'Fase clasificatoria',final:'Fase final'},
       STATUS={ACTIVE:'ACTIVE',QUALIFIED:'QUALIFIED',ELIMINATED:'ELIMINATED',CHAMPION:'CHAMPION',RUNNER_UP:'RUNNER_UP'},
@@ -20,7 +20,7 @@
   function initial(v){return(String(v||'').trim().charAt(0)||'?').toUpperCase();}
   function isStage(v){return Object.keys(STAGES).some(function(k){return STAGES[k]===v;});}
   function isStatus(v){return Object.keys(STATUS).some(function(k){return STATUS[k]===v;});}
-  function inferFormat(name){return/\+\s*60(?!\d)/i.test(String(name||''))?FORMATS.ROUND_ROBIN:FORMATS.ZONES_AND_FINAL;}
+  function inferFormat(name){return/\+\s*(?:60|68)(?!\d)/i.test(String(name||''))?FORMATS.ROUND_ROBIN:FORMATS.ZONES_AND_FINAL;}
   function normalizeFormat(fmt,name){
     if(fmt===FORMATS.ROUND_ROBIN||fmt==='SINGLE_ZONE')return FORMATS.ROUND_ROBIN;
     if(fmt===FORMATS.ZONES_AND_FINAL||fmt==='ZONES')return FORMATS.ZONES_AND_FINAL;
@@ -30,7 +30,7 @@
   function categoryStageLabel(c){
     if(!c)return'';
     if(c.currentStage===STAGES.FINISHED)return LABELS.FINISHED;
-    if(isSingleZoneCategory(c))return'Zona única · Todos contra todos';
+    if(isSingleZoneCategory(c))return'Zona única · Todos contra todos (+60 / +68)';
     return LABELS[c.currentStage]||LABELS.GENERAL;
   }
   function calculateTeamTotal(team){return team.scoreEntries.reduce(function(total,entry){return total+entry.points;},0);}
@@ -602,7 +602,7 @@
     var totalZones=state.categories.reduce(function(acc,c){return acc+zoneFlow(c).zones.length;},0);
     return'<div class="heading"><div><p class="eyebrow">PANEL DE CONTROL</p><h1>Mis Categorías</h1><p class="desc">Seleccioná una categoría para armar sus zonas, cargar resultados por set y consultar las posiciones.</p></div><div class="heading-actions"><button class="primary" data-action="new-category">＋ Nueva categoría</button></div></div>'+
       '<section class="onboarding-steps">'+
-        '<div class="onboard-step"><span class="onboard-num">1</span><div><b>Creá la categoría</b><small>+50 y +40 por zonas + zona final; +60 en zona única.</small></div></div>'+
+        '<div class="onboard-step"><span class="onboard-num">1</span><div><b>Creá la categoría</b><small>+50 y +40 por zonas + zona final; +60 y +68 en zona única.</small></div></div>'+
         '<div class="onboard-step"><span class="onboard-num">2</span><div><b>Armá zonas y equipos</b><small>Agregá los equipos en sus zonas todos contra todos.</small></div></div>'+
         '<div class="onboard-step"><span class="onboard-num">3</span><div><b>Cargá sets y mirá la tabla</b><small>Anotá cada partido jugado y la posición se calcula sola.</small></div></div>'+
       '</section>'+
@@ -634,7 +634,7 @@
         '<section class="card empty">'+
           '<div class="big">🏐</div>'+
           '<h2>Todavía no hay categorías creadas</h2>'+
-          '<p>Empezá creando tu primera categoría (por ejemplo: <strong>Categoría +50</strong> o <strong>Categoría +60</strong>) para armar las zonas y cargar partidos.</p>'+
+          '<p>Empezá creando tu primera categoría (por ejemplo: <strong>Categoría +50</strong>, <strong>Categoría +60</strong> o <strong>Categoría +68</strong>) para armar las zonas y cargar partidos.</p>'+
           '<button class="primary" data-action="new-category">＋ Crear mi primera categoría</button>'+
         '</section>');
   }
@@ -1008,16 +1008,16 @@
     modal.hidden=false;
     if(kind==='category'){
       modal.innerHTML='<div class="modal-box"><h2>Nueva categoría</h2><form class="form" data-form="modal-category">'+
-        '<label>Nombre de la categoría<input id="modal-category-name" name="name" required autofocus placeholder="Ej: Categoría +50, Categoría +40 o Categoría +60"></label>'+
+        '<label>Nombre de la categoría<input id="modal-category-name" name="name" required autofocus placeholder="Ej: Categoría +40, +50, +60 o +68"></label>'+
         '<label>Formato del torneo<select id="modal-category-format" name="format">'+
           '<option value="'+FORMATS.ZONES_AND_FINAL+'">Zonas clasificatorias + Zona final (+50 / +40)</option>'+
-          '<option value="'+FORMATS.ROUND_ROBIN+'">Todos contra todos en zona única (+60)</option>'+
+          '<option value="'+FORMATS.ROUND_ROBIN+'">Todos contra todos en zona única (+60 / +68)</option>'+
         '</select></label>'+
         '<div class="modal-actions"><button type="button" class="cancel" data-action="close">Cancelar</button><button class="primary">Crear categoría</button></div></form></div>';
       var nameInp=document.getElementById('modal-category-name'),fmtSel=document.getElementById('modal-category-format');
       if(nameInp&&fmtSel){
         nameInp.oninput=function(){
-          if(nameInp.value.indexOf('60')>=0)fmtSel.value=FORMATS.ROUND_ROBIN;
+          if(/(?:60|68)/.test(nameInp.value))fmtSel.value=FORMATS.ROUND_ROBIN;
           else if(nameInp.value.indexOf('50')>=0||nameInp.value.indexOf('40')>=0)fmtSel.value=FORMATS.ZONES_AND_FINAL;
         };
       }

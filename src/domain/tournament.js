@@ -1,6 +1,6 @@
 /**
  * Reglas del torneo por etapas: zonas iniciales, clasificados, zona única y
- * clasificación final. También define la modalidad +60 (zona única directa).
+ * clasificación final. También define la modalidad +60/+68 (zona única directa).
  *
  * Todo se DERIVA de los resultados registrados: no hay contadores mutables, no se
  * generan partidos, cruces, fixtures ni "partidos pendientes". La completitud de
@@ -45,7 +45,7 @@
     };
   }
 
-  /** Estado inicial de una categoría de zona única (Modalidad B, +60). */
+  /** Estado inicial de una categoría de zona única (Modalidad B, +60/+68). */
   function singleZoneTournament(zone) {
     return Object.assign(emptyZoneTournament(), {
       status: ZONE_STATUS.IN_PROGRESS,
@@ -64,7 +64,7 @@
     return Boolean(category) && category.format === FORMATS.SINGLE_ZONE;
   }
 
-  /** Sugiere la modalidad según el nombre (las categorías "+60" usan zona única). */
+  /** Sugiere la modalidad según el nombre (las categorías "+60" y "+68" usan zona única). */
   function inferFormat(name) {
     return constants.SINGLE_ZONE_CATEGORY_PATTERN.test(String(name || '')) ? FORMATS.ROUND_ROBIN : FORMATS.ZONES_AND_FINAL;
   }
@@ -79,7 +79,7 @@
     return f.zones.filter(function (zone) { return zone.id !== f.secondStageZoneId; });
   }
 
-  /** Zona única (segunda etapa en Modalidad A, o la única zona en +60). */
+  /** Zona única (segunda etapa en Modalidad A, o la única zona en +60/+68). */
   function finalZone(category) {
     const f = flow(category);
     return f.secondStageZoneId ? zoneById(category, f.secondStageZoneId) : null;

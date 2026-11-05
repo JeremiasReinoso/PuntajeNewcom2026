@@ -19,7 +19,7 @@
   /** Etapas persistidas en `category.currentStage`, `team.stage` y `match.stage`. */
   const STAGES = Object.freeze({
     GENERAL: 'GENERAL', // Fase clasificatoria (zonas iniciales).
-    ZONE_FINAL: 'ZONE_FINAL', // Zona final (+50/+40) o zona única (+60).
+    ZONE_FINAL: 'ZONE_FINAL', // Zona final (+50/+40) o zona única (+60/+68).
     FINISHED: 'FINISHED'
   });
 
@@ -68,7 +68,7 @@
   /**
    * Modalidades de competición.
    * - ZONES_AND_FINAL / ZONES: Zonas clasificatorias → 2 clasificados por zona → Zona final (+50 y +40).
-   * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (+60).
+   * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (+60/+68).
    */
   const FORMATS = Object.freeze({
     ZONES_AND_FINAL: 'zonas_y_final',
@@ -110,8 +110,8 @@
   const SINGLE_ZONE_NAME = 'Zona única';
   const SECOND_STAGE_ZONE_NAME = 'Zona final';
 
-  /** Las categorías cuyo nombre contiene "+60" usan la modalidad todos contra todos. */
-  const SINGLE_ZONE_CATEGORY_PATTERN = /\+\s*60(?!\d)/;
+  /** Las categorías +60 y +68 usan la modalidad todos contra todos. */
+  const SINGLE_ZONE_CATEGORY_PATTERN = /\+\s*(?:60|68)(?!\d)/;
 
   /** Motivo de archivo de un resultado de zona final cuando cambian los clasificados. */
   const ARCHIVE_REASONS = Object.freeze({ QUALIFICATION_CHANGE: 'QUALIFICATION_CHANGE' });
