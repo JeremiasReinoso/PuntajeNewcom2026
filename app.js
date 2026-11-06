@@ -764,9 +764,10 @@
       else if(!isWinner&&m.score==='2-0')r02+=1;
       else if(!isWinner&&m.score==='2-1')r12+=1;
     });
-    return'<tr>'+
-      '<td class="col-pos">'+(index+1)+'</td>'+
-      '<td class="col-team"><strong>'+esc(row.team.name)+'</strong></td>'+
+    var isQualifying=stage===STAGES.GENERAL&&index<2;
+    return'<tr class="'+(isQualifying?'row-qualifying':'')+'">'+
+      '<td class="col-pos '+(isQualifying?'pos-qualifying':'')+'">'+(index+1)+'</td>'+
+      '<td class="col-team"><strong>'+esc(row.team.name)+'</strong>'+(isQualifying?'<span class="qualify-badge">Clasifica</span>':'')+'</td>'+
       '<td class="col-pts"><b>'+row.classificationPoints+'</b></td>'+
       '<td>'+row.resultCount+'</td><td>'+wins+'</td><td>'+losses+'</td>'+
       '<td>'+row.setWins+'</td><td>'+row.setLosses+'</td>'+
@@ -959,7 +960,7 @@
     if(headTeams[0])headTeams[0].classList.toggle('is-winner',evalState.ready&&evalState.winsA>evalState.winsB);
     if(headTeams[1])headTeams[1].classList.toggle('is-winner',evalState.ready&&evalState.winsB>evalState.winsA);
     [1,2,3].forEach(function(n){
-      var block=document.getElementByById('set-block-'+n),row=document.getElementById('set-row-'+n),err=document.getElementById('set-error-'+n),rowEval=evalState['s'+n];
+      var block=document.getElementById('set-block-'+n),row=document.getElementById('set-row-'+n),err=document.getElementById('set-error-'+n),rowEval=evalState['s'+n];
       if(block){
         var wasHidden=block.hidden;
         block.hidden=(n===3&&!evalState.needsSet3);
