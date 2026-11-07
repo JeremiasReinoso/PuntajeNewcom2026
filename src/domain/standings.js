@@ -42,6 +42,20 @@
     return match.winnerId === teamId || match.loserId === teamId;
   }
 
+  function headToHeadDiff(aTeamId, bTeamId, matches) {
+    if (!matches || !matches.length) return 0;
+    const direct = matches.filter(function (m) {
+      return (m.winnerId === aTeamId && m.loserId === bTeamId) ||
+             (m.winnerId === bTeamId && m.loserId === aTeamId);
+    });
+    if (!direct.length) return 0;
+    const aWins = direct.filter(function (m) { return m.winnerId === aTeamId; }).length;
+    const bWins = direct.filter(function (m) { return m.winnerId === bTeamId; }).length;
+    if (aWins > bWins) return -1;
+    if (bWins > aWins) return 1;
+    return 0;
+  }
+
   /** Puntos a favor/en contra derivados de los sets de los partidos dados. */
   function setStatsFor(teamId, matches) {
     return matches.reduce(function (stats, match) {
@@ -63,23 +77,44 @@
     }, 0);
   }
 
-  /** Comparador de la tabla (criterios existentes + desempate visual por nombre). */
-  function compareRows(a, b) {
-    return b.classificationPoints - a.classificationPoints ||
-      b.pointsFor - a.pointsFor ||
-      a.pointsAgainst - b.pointsAgainst ||
-      a.team.name.localeCompare(b.team.name);
+  /**
+   * Comparador oficial de la tabla:
+   * 1. Mayor puntuación de clasificación (3, 2 y 1).
+   * 2. Mayor diferencia de puntos (DIF = PF - PC).
+   * 3. Mayor cantidad de puntos a favor (PF).
+   * 4. Menor cantidad de puntos en contra (PC).
+   * 5. Enfrentamiento directo entre los equipos empatados.
+   * 6. Criterio determinista final (orden alfabético por nombre / id).
+   */
+  function compareRows(a, b, matches) {
+    if (b.classificationPoints !== a.classificationPoints) {
+      return b.classificationPoints - a.classificationPoints;
+    }
+    if (b.difference !== a.difference) {
+      return b.difference - a.difference;
+    }
+    if (b.pointsFor !== a.pointsFor) {
+      return b.pointsFor - a.pointsFor;
+    }
+    if (a.pointsAgainst !== b.pointsAgainst) {
+      return a.pointsAgainst - b.pointsAgainst;
+    }
+    const h2h = headToHeadDiff(a.team.id, b.team.id, matches);
+    if (h2h !== 0) return h2h;
+    return a.team.name.localeCompare(b.team.name) || (a.team.id && b.team.id ? a.team.id.localeCompare(b.team.id) : 0);
   }
 
-  /** Dos filas están empatadas si coinciden en todos los criterios reglamentarios. */
-  function sameRanking(a, b) {
+  /** Dos filas están empatadas si coinciden en puntos, diferencia, tantos y no hay ganador directo. */
+  function sameRanking(a, b, matches) {
     return a.classificationPoints === b.classificationPoints &&
+      a.difference === b.difference &&
       a.pointsFor === b.pointsFor &&
-      a.pointsAgainst === b.pointsAgainst;
+      a.pointsAgainst === b.pointsAgainst &&
+      headToHeadDiff(a.team.id, b.team.id, matches) === 0;
   }
 
   function rankingKey(row) {
-    return row.classificationPoints + '/' + row.pointsFor + '/' + row.pointsAgainst;
+    return row.classificationPoints + '/' + row.difference + '/' + row.pointsFor + '/' + row.pointsAgainst;
   }
 
   /**
@@ -90,12 +125,13 @@
    */
   function computeStandings(teams, matches, options) {
     const scoreStage = options && options.scoreStage;
+    const scopedMatches = Array.isArray(matches) ? matches : [];
     return teams.map(function (team) {
-      const setStats = setStatsFor(team.id, matches);
-      const classificationPoints = classificationPointsFor(team.id, matches);
+      const setStats = setStatsFor(team.id, scopedMatches);
+      const classificationPoints = classificationPointsFor(team.id, scopedMatches);
       return {
         team,
-        resultCount: matches.filter(function (match) { return involves(match, team.id); }).length,
+        resultCount: scopedMatches.filter(function (match) { return involves(match, team.id); }).length,
         stagePoints: classificationPoints,
         classificationPoints,
         scorePoints: calculateTeamStageTotal(team, scoreStage),
@@ -104,7 +140,9 @@
         pointsAgainst: setStats.against,
         difference: setStats.for - setStats.against
       };
-    }).sort(compareRows);
+    }).sort(function (a, b) {
+      return compareRows(a, b, scopedMatches);
+    });
   }
 
   /** Firma de un grupo empatado: equipos + estadísticas compartidas. */
@@ -118,14 +156,14 @@
    * @param {Array<{signature: string, order: string[]}>} [resolutions]
    * @returns {{rows: Array, ties: Array<{teamIds: string[], start: number, end: number, signature: string, resolved: boolean}>}}
    */
-  function rankWithTies(rows, resolutions) {
+  function rankWithTies(rows, resolutions, matches) {
     const available = Array.isArray(resolutions) ? resolutions : [];
     const output = [];
     const ties = [];
     let index = 0;
     while (index < rows.length) {
       let end = index;
-      while (end + 1 < rows.length && sameRanking(rows[index], rows[end + 1])) end += 1;
+      while (end + 1 < rows.length && sameRanking(rows[index], rows[end + 1], matches)) end += 1;
       let group = rows.slice(index, end + 1);
       if (group.length > 1) {
         const signature = tieSignature(group);

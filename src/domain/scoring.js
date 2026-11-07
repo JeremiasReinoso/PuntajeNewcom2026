@@ -1,10 +1,10 @@
 /**
- * Reglas de puntuación de PuntajeNewcom (sin cambios respecto de la versión anterior).
+ * Reglas de puntuación de PuntajeNewcom.
  *
  * - Resultados permitidos: 2-0 y 2-1 (vistos desde el ganador; 1-2 y 0-2 desde el perdedor).
- * - 2-0 → 3 puntos al ganador, 0 al perdedor.
+ * - 2-0 → 3 puntos al ganador, 1 al perdedor.
  * - 2-1 → 2 puntos al ganador, 1 al perdedor.
- * - Los marcadores por set (opcionales en datos antiguos) alimentan puntos a favor/en contra.
+ * - Los marcadores por set alimentan puntos a favor (PF) y en contra (PC).
  *
  * Capa: domain. Funciones puras.
  */
@@ -28,7 +28,7 @@
 
   /** Puntos de clasificación para ganador y perdedor según el resultado. */
   function resultPoints(score) {
-    return score === '2-0' ? { winner: 3, loser: 0 } : { winner: 2, loser: 1 };
+    return score === '2-0' ? { winner: 3, loser: 1 } : { winner: 2, loser: 1 };
   }
 
   /** Normaliza un set `{a, b}` (a = ganador del partido). Devuelve null si es inválido. */

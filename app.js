@@ -235,7 +235,7 @@
   function createScoreEntry(teamId,value){var found=validateTeamForCurrent(teamId),points=Number(value);if(!Number.isInteger(points)||points<0)throw Error('El puntaje debe ser un número entero mayor o igual a 0.');found.team.scoreEntries.push({id:uid('score'),points:points,createdAt:new Date().toISOString(),stage:found.category.currentStage});saveState();}
   function addQuickScores(entries){var c=category();if(!c)throw Error('Seleccioná una categoría.');var pending=[];entries.forEach(function(item){if(item.value===''||item.value===null||typeof item.value==='undefined')return;var team=validateTeamForCurrent(item.teamId),points=Number(item.value);if(!Number.isInteger(points)||points<0)throw Error('Cada puntaje debe ser un número entero mayor o igual a 0.');pending.push({team:team.team,entry:{id:uid('score'),points:points,createdAt:new Date().toISOString(),stage:c.currentStage}});});if(!pending.length)throw Error('Ingresá al menos un puntaje para guardar.');pending.forEach(function(item){item.team.scoreEntries.push(item.entry);});saveState();return pending.length;}
   function deleteScoreEntry(teamId,entryId){var team=teamById(teamId);if(!team||team.categoryId!==state.selectedCategoryId)throw Error('Carga inválida para esta categoría.');var index=team.scoreEntries.findIndex(function(entry){return entry.id===entryId;});if(index<0)throw Error('La carga seleccionada no existe.');var removed=team.scoreEntries.splice(index,1)[0];if(!saveState()){team.scoreEntries.splice(index,0,removed);throw Error('No se pudo guardar la eliminación. La carga permanece intacta.');}return removed;}
-  function resultPoints(score){return score==='2-0'?{winner:3,loser:0}:{winner:2,loser:1};}
+  function resultPoints(score){return score==='2-0'?{winner:3,loser:1}:{winner:2,loser:1};}
   function categoryMatches(categoryId){return state.matchResults.filter(function(r){return r.categoryId===categoryId;});}
   function zoneFlow(c){return c&&c.zoneTournament?c.zoneTournament:{status:ZONE_STATUS.CONFIGURING,firstStageStatus:'CONFIGURING',secondStageStatus:null,zones:[],secondStageZoneId:null,qualified:[],confirmedAt:null};}
   function zoneById(c,id){return zoneFlow(c).zones.filter(function(z){return z.id===id;})[0]||null;}
@@ -279,12 +279,24 @@
   function removeTeamFromZone(teamId,zoneId){var c=category(),z=zoneById(c,zoneId);if(!z)throw Error('Zona inexistente.');if(zoneHasResults(c,zoneId))throw Error('No se puede quitar un equipo de una zona con resultados cargados.');if(isSingleZoneCategory(c)){z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});state.teams=state.teams.filter(function(t){return t.id!==teamId;});loaderDraft=null;saveState();return;}if(c.currentStage!==STAGES.GENERAL)throw Error('No se puede modificar una etapa cerrada.');z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});loaderDraft=null;saveState();}
   function deleteZone(id){var c=category(),f=zoneFlow(c),z=zoneById(c,id);if(!z||id===f.secondStageZoneId||z.phase===ZONE_PHASES.FINAL)throw Error('No se puede eliminar la zona final.');if(c.currentStage!==STAGES.GENERAL||f.status===ZONE_STATUS.FINISHED)throw Error('La fase clasificatoria ya fue cerrada.');var affected=categoryMatches(c.id).filter(function(r){return r.zoneId===id;});f.zones=f.zones.filter(function(item){return item.id!==id;});state.matchResults=state.matchResults.filter(function(r){return r.zoneId!==id;});f.status=f.zones.length?ZONE_STATUS.IN_PROGRESS:ZONE_STATUS.CONFIGURING;loaderDraft=null;saveState();return{teams:z.teamIds.length,results:affected.length};}
   function zoneRows(c,z,stage){return standings(c.id,stage||stageForZone(c,z.id),z.id);}
-  function sameRanking(a,b){
+  function headToHeadDiff(aTeamId,bTeamId,matches){
+    if(!matches||!matches.length)return 0;
+    var direct=matches.filter(function(m){
+      return (m.winnerId===aTeamId&&m.loserId===bTeamId)||(m.winnerId===bTeamId&&m.loserId===aTeamId);
+    });
+    if(!direct.length)return 0;
+    var aWins=direct.filter(function(m){return m.winnerId===aTeamId;}).length;
+    var bWins=direct.filter(function(m){return m.winnerId===bTeamId;}).length;
+    if(aWins>bWins)return -1;
+    if(bWins>aWins)return 1;
+    return 0;
+  }
+  function sameRanking(a,b,matches){
     return a.classificationPoints===b.classificationPoints&&
-      Math.abs(a.setRatio-b.setRatio)<1e-9&&
-      Math.abs(a.ptosRatio-b.ptosRatio)<1e-9&&
+      a.difference===b.difference&&
       a.pointsFor===b.pointsFor&&
-      a.pointsAgainst===b.pointsAgainst;
+      a.pointsAgainst===b.pointsAgainst&&
+      headToHeadDiff(a.team.id,b.team.id,matches)===0;
   }
   function evaluateZoneQualification(c){
     if(!c||isSingleZoneCategory(c))return{ready:false,warnings:['Esta categoría es de zona única (todos contra todos).'],qualifiers:[]};
@@ -313,7 +325,8 @@
         return;
       }
       var rows=zoneRows(c,z,STAGES.GENERAL);
-      if(rows.length>=3&&sameRanking(rows[1],rows[2])){
+      var scopedMatches=zoneMatches(c.id,STAGES.GENERAL,z.id);
+      if(rows.length>=3&&sameRanking(rows[1],rows[2],scopedMatches)){
         warnings.push('Empate sin definir en '+z.name+' entre '+rows[1].team.name+' y '+rows[2].team.name+' por el 2° puesto de clasificación.');
       }else if(rows.length>=2&&rows[0].resultCount===0&&rows[1].resultCount===0){
         warnings.push('Faltan resultados en '+z.name+' para definir a los dos clasificados.');
@@ -377,19 +390,33 @@
 
   function standings(categoryId,stage,zoneId){
     var targetCat=state.categories.filter(function(c){return c.id===categoryId;})[0]||category();
+    var allScopedMatches=categoryMatches(categoryId).filter(function(r){return(!stage||r.stage===stage)&&(!zoneId||r.zoneId===zoneId);});
     return teams(categoryId).filter(function(team){
       return !zoneId||zoneById(targetCat,zoneId)&&zoneById(targetCat,zoneId).teamIds.indexOf(team.id)>=0;
     }).map(function(team){
-      var scoped=categoryMatches(categoryId).filter(function(r){return(!stage||r.stage===stage)&&(!zoneId||r.zoneId===zoneId)&&(r.winnerId===team.id||r.loserId===team.id);});
+      var scoped=allScopedMatches.filter(function(r){return r.winnerId===team.id||r.loserId===team.id;});
       var classificationPoints=scoped.reduce(function(total,r){var p=resultPoints(r.score);return total+(r.winnerId===team.id?p.winner:p.loser);},0);
       var setStats=teamSetStats(team.id,categoryId,stage,zoneId);
       var setWins=scoped.reduce(function(total,m){return total+(m.winnerId===team.id?2:(m.score==='2-1'?1:0));},0);
       var setLosses=scoped.reduce(function(total,m){return total+(m.winnerId===team.id?(m.score==='2-1'?1:0):2);},0);
       var setRatio=setLosses>0?(setWins/setLosses):(setWins>0?1000+setWins:0);
       var ptosRatio=setStats.against>0?(setStats.for/setStats.against):(setStats.for>0?1000+setStats.for:0);
-      return{team:team,resultCount:scoped.length,stagePoints:classificationPoints,classificationPoints:classificationPoints,scorePoints:calculateTeamStageTotal(team,stage),totalPoints:calculateTeamTotal(team),pointsFor:setStats.for,pointsAgainst:setStats.against,difference:setStats.for-setStats.against,setWins:setWins,setLosses:setLosses,setRatio:setRatio,ptosRatio:ptosRatio};
+      var difference=setStats.for-setStats.against;
+      return{team:team,resultCount:scoped.length,stagePoints:classificationPoints,classificationPoints:classificationPoints,scorePoints:calculateTeamStageTotal(team,stage),totalPoints:calculateTeamTotal(team),pointsFor:setStats.for,pointsAgainst:setStats.against,difference:difference,setWins:setWins,setLosses:setLosses,setRatio:setRatio,ptosRatio:ptosRatio};
     }).sort(function(a,b){
-      return b.classificationPoints-a.classificationPoints||b.setRatio-a.setRatio||b.ptosRatio-a.ptosRatio||b.pointsFor-a.pointsFor||a.pointsAgainst-b.pointsAgainst||a.team.name.localeCompare(b.team.name);
+      // 1. PUNTOS de clasificación principales (3, 2 y 1)
+      if(b.classificationPoints!==a.classificationPoints)return b.classificationPoints-a.classificationPoints;
+      // 2. Desempate 1: Mayor diferencia de puntos (DIF = PF - PC)
+      if(b.difference!==a.difference)return b.difference-a.difference;
+      // 3. Desempate 2: Mayor cantidad de puntos a favor (PF)
+      if(b.pointsFor!==a.pointsFor)return b.pointsFor-a.pointsFor;
+      // 4. Desempate 3: Menor cantidad de puntos en contra (PC)
+      if(a.pointsAgainst!==b.pointsAgainst)return a.pointsAgainst-b.pointsAgainst;
+      // 5. Desempate 4: Resultado del enfrentamiento directo entre los equipos empatados
+      var h2h=headToHeadDiff(a.team.id,b.team.id,allScopedMatches);
+      if(h2h!==0)return h2h;
+      // 6. Desempate 5 determinista final
+      return a.team.name.localeCompare(b.team.name)||(a.team.id&&b.team.id?a.team.id.localeCompare(b.team.id):0);
     });
   }
 
@@ -765,13 +792,15 @@
       else if(!isWinner&&m.score==='2-1')r12+=1;
     });
     var isQualifying=stage===STAGES.GENERAL&&index<2;
+    var difSign=row.difference>0?'+'+row.difference:String(row.difference);
+    var difClass=row.difference>0?'dif-plus':row.difference<0?'dif-minus':'';
     return'<tr class="'+(isQualifying?'row-qualifying':'')+'">'+
       '<td class="col-pos '+(isQualifying?'pos-qualifying':'')+'">'+(index+1)+'</td>'+
       '<td class="col-team"><strong>'+esc(row.team.name)+'</strong>'+(isQualifying?'<span class="qualify-badge">Clasifica</span>':'')+'</td>'+
       '<td class="col-pts"><b>'+row.classificationPoints+'</b></td>'+
       '<td>'+row.resultCount+'</td><td>'+wins+'</td><td>'+losses+'</td>'+
       '<td>'+row.setWins+'</td><td>'+row.setLosses+'</td>'+
-      '<td>'+row.pointsFor+'</td><td>'+row.pointsAgainst+'</td>'+
+      '<td>'+row.pointsFor+'</td><td>'+row.pointsAgainst+'</td><td class="col-dif '+difClass+'"><b>'+difSign+'</b></td>'+
       '<td class="col-res">'+r20+'</td><td class="col-res">'+r21+'</td><td class="col-res">'+r02+'</td><td class="col-res">'+r12+'</td>'+
       '<td class="col-coc">'+formatRatioComma(row.setWins,row.setLosses,false)+'</td>'+
       '<td class="col-coc">'+formatRatioComma(row.pointsFor,row.pointsAgainst,false)+'</td>'+
@@ -797,20 +826,20 @@
               '<th rowspan="2" class="th-pts">PUNTOS</th>'+
               '<th colspan="3" class="th-block">PARTIDOS</th>'+
               '<th colspan="2" class="th-block">SET</th>'+
-              '<th colspan="2" class="th-block">TANTOS</th>'+
+              '<th colspan="3" class="th-block">TANTOS</th>'+
               '<th colspan="4" class="th-block th-res-group">RESULTADOS</th>'+
               '<th colspan="3" class="th-block th-coc-group">COCIENTES</th>'+
             '</tr>'+
             '<tr class="thead-sub-row">'+
               '<th>J</th><th>G</th><th>P</th>'+
               '<th>SF</th><th>SE</th>'+
-              '<th>PG</th><th>PP</th>'+
+              '<th>PG</th><th>PP</th><th>DIF</th>'+
               '<th class="th-res-sub">2-0</th><th class="th-res-sub">2-1</th><th class="th-res-sub">0-2</th><th class="th-res-sub">1-2</th>'+
               '<th class="th-coc-sub">SET</th><th class="th-coc-sub">PTOS</th><th class="th-coc-sub">P.</th>'+
             '</tr>'+
           '</thead>'+
           '<tbody>'+
-            (rows.length?rows.map(function(row,i){return positionRow(c,z,row,i,stage);}).join(''):'<tr><td colspan="17" class="empty-cell">Sin equipos asignados en esta zona.</td></tr>')+
+            (rows.length?rows.map(function(row,i){return positionRow(c,z,row,i,stage);}).join(''):'<tr><td colspan="18" class="empty-cell">Sin equipos asignados en esta zona.</td></tr>')+
           '</tbody>'+
         '</table>'+
       '</div>'+
@@ -826,10 +855,10 @@
     }
     if(single){
       var singleZ=finZone||f.zones[0];
-      return'<div class="toolbar"><div><p class="eyebrow">PASO 3 · PLANILLA OFICIAL DE POSICIONES</p><h2>Tabla de Posiciones · Todos contra todos</h2><p class="desc">Todos los equipos juegan en una única zona y esta tabla define las posiciones finales. Orden: PUNTOS, cociente de SET y cociente de PTOS.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
+      return'<div class="toolbar"><div><p class="eyebrow">PASO 3 · PLANILLA OFICIAL DE POSICIONES</p><h2>Tabla de Posiciones · Todos contra todos</h2><p class="desc">Puntaje principal: 3 (2–0), 2 (2–1) y 1 (perdedor). Desempates: 1° DIF (PF - PC), 2° PF, 3° Menor PC, 4° Enfrentamiento directo.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
         (singleZ?renderZoneStandingsSheet(c,singleZ,stageForZone(singleZ)):'');
     }
-    return'<div class="toolbar"><div><p class="eyebrow">PASO 3 · PLANILLA OFICIAL DE POSICIONES</p><h2>Tabla de Posiciones por Zona</h2><p class="desc">Se calcula automáticamente a partir de los sets cargados. Orden: PUNTOS, cociente de SET y cociente de PTOS.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
+    return'<div class="toolbar"><div><p class="eyebrow">PASO 3 · PLANILLA OFICIAL DE POSICIONES</p><h2>Tabla de Posiciones por Zona</h2><p class="desc">Puntaje principal: 3 (2–0), 2 (2–1) y 1 (perdedor). Desempates: 1° DIF (PF - PC), 2° PF, 3° Menor PC, 4° Enfrentamiento directo.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
       (finZone?'<div class="positions-stack" style="margin-bottom:24px">'+renderZoneStandingsSheet(c,finZone,STAGES.ZONE_FINAL)+'</div>':'')+
       '<div class="positions-stack">'+qualZones.map(function(z){return renderZoneStandingsSheet(c,z,STAGES.GENERAL);}).join('')+'</div>';
   }

@@ -149,8 +149,9 @@
 
   /** Tabla de una zona con empates detectados y resoluciones manuales aplicadas. */
   function zoneRanking(ctx, zone, stage) {
-    const rows = standings.computeStandings(zoneTeams(ctx, zone), scopeMatches(ctx, stage, zone.id), { scoreStage: stage });
-    const ranked = standings.rankWithTies(rows, tieResolutions(ctx.category, scopeKey(stage, zone.id)));
+    const matches = scopeMatches(ctx, stage, zone.id);
+    const rows = standings.computeStandings(zoneTeams(ctx, zone), matches, { scoreStage: stage });
+    const ranked = standings.rankWithTies(rows, tieResolutions(ctx.category, scopeKey(stage, zone.id)), matches);
     return Object.assign(ranked, { scope: scopeKey(stage, zone.id), stage, zoneId: zone.id });
   }
 

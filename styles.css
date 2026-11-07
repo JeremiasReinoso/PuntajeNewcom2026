@@ -280,6 +280,9 @@ main { max-width: 1260px; margin: auto; padding: 30px 36px 48px; }
 .official-positions-table .col-pts { background: var(--green-soft); color: var(--green-dark); font-size: 13px; }
 [data-theme="dark"] .official-positions-table .col-pts { color: var(--green); }
 .official-positions-table .col-res { background: var(--soft); color: var(--muted); }
+.official-positions-table .col-dif { background: var(--soft); font-weight: 800; font-size: 12px; }
+.official-positions-table .col-dif.dif-plus { color: var(--green); }
+.official-positions-table .col-dif.dif-minus { color: var(--accent); }
 .official-positions-table .col-coc { background: var(--green-soft); font-weight: 700; }
 .empty-cell { padding: 26px !important; color: var(--muted); }
 

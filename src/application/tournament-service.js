@@ -486,8 +486,9 @@
       const zone = tournament.zoneById(category, parts[1]);
       ensure(zone && tournament.stageForZone(category, zone.id) === parts[0], 'Ámbito de empate inválido.', 'INVALID_SCOPE');
       const ctx = context(category.id);
-      const rows = standingsLib.computeStandings(tournament.zoneTeams(ctx, zone), tournament.scopeMatches(ctx, parts[0], zone.id), { scoreStage: parts[0] });
-      return standingsLib.rankWithTies(rows, []).ties;
+      const matches = tournament.scopeMatches(ctx, parts[0], zone.id);
+      const rows = standingsLib.computeStandings(tournament.zoneTeams(ctx, zone), matches, { scoreStage: parts[0] });
+      return standingsLib.rankWithTies(rows, [], matches).ties;
     }
 
     /**
