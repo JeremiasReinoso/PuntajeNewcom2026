@@ -91,13 +91,14 @@
   }
 
   function normalizeMatch(match) {
-    const sets = scoring.normalizeSets(match.sets);
+    const score = scoring.resolveMatchScore(match);
+    const sets = scoring.matchSetsFor({ score, sets: match.sets });
     const normalized = {
       id: match.id,
       categoryId: match.categoryId,
       winnerId: match.winnerId,
       loserId: match.loserId,
-      score: match.score,
+      score,
       sets: sets.length ? sets : [],
       stage: isOneOf(STAGES, match.stage) ? match.stage : STAGES.GENERAL,
       zoneId: typeof match.zoneId === 'string' ? match.zoneId : null,
@@ -158,7 +159,7 @@
     const matchIds = {};
     const matchResults = (Array.isArray(raw.matchResults) ? raw.matchResults : []).filter(function (r) {
       return r && isNonEmptyString(r.id) && !matchIds[r.id] && categoryIds[r.categoryId] && teamIds[r.winnerId] && teamIds[r.loserId] &&
-        r.winnerId !== r.loserId && scoring.isValidScore(r.score) && (matchIds[r.id] = true);
+        r.winnerId !== r.loserId && Boolean(scoring.resolveMatchScore(r)) && (matchIds[r.id] = true);
     }).map(normalizeMatch);
 
     const normalizedCategories = categories.map(function (c) {

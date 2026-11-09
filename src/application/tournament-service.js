@@ -114,6 +114,16 @@
       return standingsLib.computeStandings(teams, matches, { scoreStage: stage });
     }
 
+    /** Puntos de clasificación acumulados por un equipo según el sistema 3-2-1. */
+    function classificationPoints(teamId, stage, zoneId) {
+      const team = teamById(teamId);
+      if (!team) return 0;
+      const matches = tournament.liveMatches(matchesOf(team.categoryId)).filter(function (r) {
+        return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
+      });
+      return standingsLib.classificationPointsFor(team.id, matches);
+    }
+
     function zoneRanking(categoryId, zoneId, stage) {
       const ctx = context(categoryId);
       const zone = ctx && tournament.zoneById(ctx.category, zoneId);
@@ -588,9 +598,9 @@
     /** Orienta sets cargados como "equipo 1 – equipo 2" hacia el ganador. */
     function orientSets(teamAWins, setScores) {
       return setScores.map(function (set) {
-        const x = Number(set.a);
-        const y = Number(set.b);
-        return teamAWins ? { a: x, b: y } : { a: y, b: x };
+        const normalized = scoring.normalizeSet(set);
+        if (!normalized) return set;
+        return teamAWins ? { a: normalized.a, b: normalized.b } : { a: normalized.b, b: normalized.a };
       });
     }
 
@@ -622,14 +632,22 @@
       ensure(scoring.isValidScore(score), 'El resultado debe ser 2–0 o 2–1.', 'INVALID_SCORE');
       let normalizedSets = match.sets;
       if (typeof sets !== 'undefined') {
-        normalizedSets = scoring.validateMatchSets(sets);
+        normalizedSets = Array.isArray(sets) && sets.length === 0 ? [] : scoring.validateMatchSets(sets);
         scoring.ensureScoreMatchesSets(score, normalizedSets);
+      } else if (Array.isArray(normalizedSets) && normalizedSets.length) {
+        if (winnerId !== match.winnerId && score === match.score) {
+          normalizedSets = normalizedSets.map(function (s) { return { a: s.b, b: s.a }; });
+        }
+        if (scoring.matchSetsFor({ score, sets: normalizedSets }).length !== normalizedSets.length) {
+          normalizedSets = [];
+        }
       }
       match.winnerId = winnerId;
       match.loserId = loserId;
       match.score = score;
       match.sets = normalizedSets;
       match.updatedAt = now();
+      return match;
     }
 
     /** Corrige el resultado tradicional (y opcionalmente los sets) manteniendo ganador. */
@@ -637,7 +655,7 @@
       const match = requireEditableMatch(matchId);
       return commit(function () {
         const m = matchById(match.id);
-        applyMatchUpdate(m, m.winnerId, m.loserId, score, sets);
+        return applyMatchUpdate(m, m.winnerId, m.loserId, score, sets);
       }, 'No se pudo guardar la corrección.');
     }
 
@@ -653,7 +671,7 @@
       const winner = parsed.resolved.teamAWins ? teamAId : teamBId;
       const loser = parsed.resolved.teamAWins ? teamBId : teamAId;
       return commit(function () {
-        applyMatchUpdate(matchById(match.id), winner, loser, parsed.resolved.score, parsed.sets);
+        return applyMatchUpdate(matchById(match.id), winner, loser, parsed.resolved.score, parsed.sets);
       }, 'No se pudo guardar la corrección.');
     }
 
@@ -700,7 +718,8 @@
     return Object.freeze({
       // consultas
       getState, rawState, categoryById, selectedCategory, teamsOf, teamById, matchById, matchesOf, activeTeams,
-      categoryEntries, context, standings, zoneRanking, zoneProgress, qualification, finalClassification,
+      categoryEntries, context, standings, classificationPoints, resultPoints: scoring.resultPoints,
+      zoneRanking, zoneProgress, qualification, finalClassification,
       qualificationDrift, phase, previewReconcile, previewQualificationImpact,
       // categorías y preferencias
       selectCategory, setTheme, createCategory, editCategory, deleteCategory, convertToSingleZone,

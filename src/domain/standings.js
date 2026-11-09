@@ -1,12 +1,18 @@
 /**
  * Tablas de posiciones y detección de empates.
  *
- * Criterios de orden (idénticos a la versión anterior, en este orden):
- *   1. Más puntos de clasificación (3/2/1/0 por partido).
- *   2. Más puntos a favor (suma de marcadores de sets).
- *   3. Menos puntos en contra.
- *   4. Nombre alfabético — SÓLO para mostrar un orden estable; NO es un criterio
- *      reglamentario. Por eso, dos equipos iguales en 1–3 se reportan como empate.
+ * Sistema de puntuación oficial 3-2-1:
+ *   - Victoria 2-0: 3 puntos para el ganador, 1 punto para el perdedor.
+ *   - Victoria 2-1: 2 puntos para el ganador, 1 punto para el perdedor.
+ *
+ * Criterios de orden en cascada:
+ *   1. Más puntos de clasificación (3, 2 y 1 por partido).
+ *   2. Mayor diferencia de tantos (DIF = PF - PC).
+ *   3. Más puntos a favor (PF, suma de marcadores de sets).
+ *   4. Menos puntos en contra (PC).
+ *   5. Enfrentamiento directo entre los equipos empatados.
+ *   6. Nombre alfabético / id — SÓLO para mostrar un orden estable; NO es un criterio
+ *      reglamentario. Por eso, dos equipos iguales en 1–5 se reportan como empate.
  *
  * Un empate puede resolverse manualmente: la resolución guarda el orden elegido y
  * una "firma" (equipos + estadísticas). Si los resultados cambian y la firma deja
@@ -39,14 +45,16 @@
   }
 
   function involves(match, teamId) {
-    return match.winnerId === teamId || match.loserId === teamId;
+    return Boolean(match) && !match.archived && (match.winnerId === teamId || match.loserId === teamId) && match.winnerId !== match.loserId;
   }
 
   function headToHeadDiff(aTeamId, bTeamId, matches) {
     if (!matches || !matches.length) return 0;
     const direct = matches.filter(function (m) {
-      return (m.winnerId === aTeamId && m.loserId === bTeamId) ||
-             (m.winnerId === bTeamId && m.loserId === aTeamId);
+      return m && !m.archived && (
+        (m.winnerId === aTeamId && m.loserId === bTeamId) ||
+        (m.winnerId === bTeamId && m.loserId === aTeamId)
+      );
     });
     if (!direct.length) return 0;
     const aWins = direct.filter(function (m) { return m.winnerId === aTeamId; }).length;
@@ -58,7 +66,7 @@
 
   /** Puntos a favor/en contra derivados de los sets de los partidos dados. */
   function setStatsFor(teamId, matches) {
-    return matches.reduce(function (stats, match) {
+    return (Array.isArray(matches) ? matches : []).reduce(function (stats, match) {
       if (!involves(match, teamId)) return stats;
       const isWinner = match.winnerId === teamId;
       scoring.matchSetsFor(match).forEach(function (set) {
@@ -70,10 +78,8 @@
   }
 
   function classificationPointsFor(teamId, matches) {
-    return matches.reduce(function (total, match) {
-      if (!involves(match, teamId)) return total;
-      const points = scoring.resultPoints(match.score);
-      return total + (match.winnerId === teamId ? points.winner : points.loser);
+    return (Array.isArray(matches) ? matches : []).reduce(function (total, match) {
+      return total + scoring.matchPointsForTeam(match, teamId);
     }, 0);
   }
 
@@ -125,20 +131,66 @@
    */
   function computeStandings(teams, matches, options) {
     const scoreStage = options && options.scoreStage;
-    const scopedMatches = Array.isArray(matches) ? matches : [];
+    const scopedMatches = (Array.isArray(matches) ? matches : []).filter(function (match) {
+      return match && !match.archived && Boolean(scoring.resolveMatchScore(match));
+    });
     return teams.map(function (team) {
+      const teamMatches = scopedMatches.filter(function (match) { return involves(match, team.id); });
       const setStats = setStatsFor(team.id, scopedMatches);
       const classificationPoints = classificationPointsFor(team.id, scopedMatches);
+      let wins = 0;
+      let losses = 0;
+      let won20 = 0;
+      let won21 = 0;
+      let lost02 = 0;
+      let lost12 = 0;
+      let setWins = 0;
+      let setLosses = 0;
+      teamMatches.forEach(function (match) {
+        const isWinner = match.winnerId === team.id;
+        const score = scoring.resolveMatchScore(match);
+        if (isWinner) {
+          wins += 1;
+          setWins += 2;
+          if (score === '2-1') {
+            won21 += 1;
+            setLosses += 1;
+          } else {
+            won20 += 1;
+          }
+        } else {
+          losses += 1;
+          setLosses += 2;
+          if (score === '2-1') {
+            lost12 += 1;
+            setWins += 1;
+          } else {
+            lost02 += 1;
+          }
+        }
+      });
+      const setRatio = setLosses > 0 ? (setWins / setLosses) : (setWins > 0 ? 1000 + setWins : 0);
+      const ptosRatio = setStats.against > 0 ? (setStats.for / setStats.against) : (setStats.for > 0 ? 1000 + setStats.for : 0);
       return {
         team,
-        resultCount: scopedMatches.filter(function (match) { return involves(match, team.id); }).length,
+        resultCount: teamMatches.length,
+        wins,
+        losses,
+        won20,
+        won21,
+        lost02,
+        lost12,
         stagePoints: classificationPoints,
         classificationPoints,
         scorePoints: calculateTeamStageTotal(team, scoreStage),
         totalPoints: calculateTeamTotal(team),
         pointsFor: setStats.for,
         pointsAgainst: setStats.against,
-        difference: setStats.for - setStats.against
+        difference: setStats.for - setStats.against,
+        setWins,
+        setLosses,
+        setRatio,
+        ptosRatio
       };
     }).sort(function (a, b) {
       return compareRows(a, b, scopedMatches);

@@ -95,7 +95,12 @@
   }
 
   function stageForZone(category, zoneId) {
-    return zoneId && zoneId === flow(category).secondStageZoneId ? STAGES.ZONE_FINAL : STAGES.GENERAL;
+    if (isSingleZoneFormat(category)) return STAGES.ZONE_FINAL;
+    const zone = zoneId ? zoneById(category, zoneId) : null;
+    if ((zoneId && zoneId === flow(category).secondStageZoneId) || (zone && zone.phase === constants.ZONE_PHASES.FINAL)) {
+      return STAGES.ZONE_FINAL;
+    }
+    return STAGES.GENERAL;
   }
 
   function scopeKey(stage, zoneId) {
