@@ -111,17 +111,27 @@
       const matches = tournament.liveMatches(matchesOf(categoryId)).filter(function (r) {
         return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
       });
-      return standingsLib.computeStandings(teams, matches, { scoreStage: stage });
+      const options = { scoreStage: stage };
+      if (category && tournament.isFinalAccumulatedScope(category, stage, zoneId)) {
+        options.baselineByTeamId = tournament.qualifiedBaselineMap(context(categoryId));
+      }
+      return standingsLib.computeStandings(teams, matches, options);
     }
 
     /** Puntos de clasificación acumulados por un equipo según el sistema 3-2-1. */
     function classificationPoints(teamId, stage, zoneId) {
       const team = teamById(teamId);
       if (!team) return 0;
+      const category = categoryById(team.categoryId);
       const matches = tournament.liveMatches(matchesOf(team.categoryId)).filter(function (r) {
         return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
       });
-      return standingsLib.classificationPointsFor(team.id, matches);
+      let total = standingsLib.classificationPointsFor(team.id, matches);
+      if (category && tournament.isFinalAccumulatedScope(category, stage, zoneId)) {
+        const baseline = tournament.qualifiedBaselineMap(context(category.id))[team.id];
+        if (baseline) total += baseline.classificationPoints;
+      }
+      return total;
     }
 
     function zoneRanking(categoryId, zoneId, stage) {
@@ -402,8 +412,8 @@
     // -------------------------------------------------------------------------
 
     /**
-     * Cierra la primera etapa y crea la zona única con los 2 primeros de cada zona.
-     * No traslada resultados: la zona única empieza su propia tabla desde cero.
+     * Cierra la primera etapa y crea la Zona final con los 2 primeros de cada zona,
+     * transfiriendo sus estadísticas acumuladas de la fase clasificatoria sin duplicar partidos.
      */
     function confirmZones() {
       const category = requireCategory();
@@ -416,7 +426,14 @@
         const f = tournament.flow(c);
         const qualifiedIds = result.qualifiers.map(function (q) { return q.teamId; });
         const second = { id: newId('zone'), name: constants.SECOND_STAGE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: qualifiedIds.slice() };
-        f.qualified = result.qualifiers.map(function (q) { return Object.assign({}, q); });
+        f.qualified = result.qualifiers.map(function (q) {
+          return {
+            teamId: q.teamId,
+            sourceZoneId: q.sourceZoneId,
+            position: q.position,
+            carriedStats: standingsLib.toCarriedStats(q.carriedStats)
+          };
+        });
         f.zones.push(second);
         f.secondStageZoneId = second.id;
         f.status = ZONE_STATUS.IN_PROGRESS;
@@ -466,7 +483,14 @@
         const zone = tournament.finalZone(c);
         const nextIds = preview.qualifiers.map(function (q) { return q.teamId; });
         zone.teamIds = nextIds.slice();
-        f.qualified = preview.qualifiers.map(function (q) { return Object.assign({}, q); });
+        f.qualified = preview.qualifiers.map(function (q) {
+          return {
+            teamId: q.teamId,
+            sourceZoneId: q.sourceZoneId,
+            position: q.position,
+            carriedStats: standingsLib.toCarriedStats(q.carriedStats)
+          };
+        });
         f.qualificationUpdatedAt = now();
         teamsOf(c.id).forEach(function (t) {
           if (nextIds.indexOf(t.id) >= 0) { t.status = STATUS.QUALIFIED; t.stage = STAGES.ZONE_FINAL; } else if (t.status === STATUS.QUALIFIED) t.status = STATUS.ELIMINATED;
@@ -497,7 +521,11 @@
       ensure(zone && tournament.stageForZone(category, zone.id) === parts[0], 'Ámbito de empate inválido.', 'INVALID_SCOPE');
       const ctx = context(category.id);
       const matches = tournament.scopeMatches(ctx, parts[0], zone.id);
-      const rows = standingsLib.computeStandings(tournament.zoneTeams(ctx, zone), matches, { scoreStage: parts[0] });
+      const options = { scoreStage: parts[0] };
+      if (tournament.isFinalAccumulatedScope(category, parts[0], zone.id)) {
+        options.baselineByTeamId = tournament.qualifiedBaselineMap(ctx);
+      }
+      const rows = standingsLib.computeStandings(tournament.zoneTeams(ctx, zone), matches, options);
       return standingsLib.rankWithTies(rows, [], matches).ties;
     }
 
@@ -582,9 +610,15 @@
       return { stage: target.stage, zoneId: zoneKey, sets: normalizedSets, correction: target.correction };
     }
 
+    function syncCategoryCarriedStats(categoryId) {
+      const ctx = context(categoryId);
+      if (ctx) tournament.syncCarriedStats(ctx);
+    }
+
     function pushMatch(categoryId, winnerId, loserId, score, validated) {
       const match = { id: newId('match'), categoryId, winnerId, loserId, score, sets: validated.sets, stage: validated.stage, zoneId: validated.zoneId, createdAt: now() };
       state.matchResults.push(match);
+      if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(categoryId);
       return match;
     }
 
@@ -647,6 +681,7 @@
       match.score = score;
       match.sets = normalizedSets;
       match.updatedAt = now();
+      if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(match.categoryId);
       return match;
     }
 
@@ -676,9 +711,10 @@
     }
 
     function deleteMatchResult(matchId) {
-      requireEditableMatch(matchId);
+      const match = requireEditableMatch(matchId);
       return commit(function () {
         state.matchResults = state.matchResults.filter(function (r) { return r.id !== matchId; });
+        if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(match.categoryId);
       }, 'No se pudo guardar la eliminación.');
     }
 

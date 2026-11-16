@@ -123,29 +123,107 @@
     return row.classificationPoints + '/' + row.difference + '/' + row.pointsFor + '/' + row.pointsAgainst;
   }
 
+  function emptyCarriedStats() {
+    return {
+      classificationPoints: 0,
+      resultCount: 0,
+      wins: 0,
+      losses: 0,
+      won20: 0,
+      won21: 0,
+      lost02: 0,
+      lost12: 0,
+      setWins: 0,
+      setLosses: 0,
+      pointsFor: 0,
+      pointsAgainst: 0,
+      difference: 0,
+      setRatio: 0,
+      ptosRatio: 0
+    };
+  }
+
+  function nonNegativeInt(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 ? n : 0;
+  }
+
+  function computeSetRatio(setWins, setLosses) {
+    return setLosses > 0 ? (setWins / setLosses) : (setWins > 0 ? 1000 + setWins : 0);
+  }
+
+  function computePointsRatio(pointsFor, pointsAgainst) {
+    return pointsAgainst > 0 ? (pointsFor / pointsAgainst) : (pointsFor > 0 ? 1000 + pointsFor : 0);
+  }
+
+  /** Normaliza un bloque de estadísticas acumuladas transferidas desde la fase clasificatoria. */
+  function normalizeCarriedStats(raw) {
+    if (!raw || typeof raw !== 'object') return emptyCarriedStats();
+    const setWins = nonNegativeInt(raw.setWins);
+    const setLosses = nonNegativeInt(raw.setLosses);
+    const pointsFor = nonNegativeInt(raw.pointsFor);
+    const pointsAgainst = nonNegativeInt(raw.pointsAgainst);
+    const wins = nonNegativeInt(raw.wins);
+    const losses = nonNegativeInt(raw.losses);
+    const won20 = nonNegativeInt(raw.won20);
+    const won21 = nonNegativeInt(raw.won21);
+    const lost02 = nonNegativeInt(raw.lost02);
+    const lost12 = nonNegativeInt(raw.lost12);
+    const resultCount = Math.max(nonNegativeInt(raw.resultCount), wins + losses);
+    return {
+      classificationPoints: nonNegativeInt(raw.classificationPoints),
+      resultCount,
+      wins,
+      losses,
+      won20,
+      won21,
+      lost02,
+      lost12,
+      setWins,
+      setLosses,
+      pointsFor,
+      pointsAgainst,
+      difference: pointsFor - pointsAgainst,
+      setRatio: computeSetRatio(setWins, setLosses),
+      ptosRatio: computePointsRatio(pointsFor, pointsAgainst)
+    };
+  }
+
+  /** Extrae una instantánea inmutable de estadísticas transferibles a partir de una fila de tabla. */
+  function toCarriedStats(row) {
+    if (!row || typeof row !== 'object') return emptyCarriedStats();
+    return normalizeCarriedStats(row);
+  }
+
   /**
    * Calcula la tabla de posiciones.
    * @param {Array} teams Equipos que integran la tabla.
    * @param {Array} matches Partidos YA filtrados por ámbito (etapa/zona, no archivados).
-   * @param {{scoreStage?: string}} [options] Etapa usada para totalizar cargas de puntaje.
+   * @param {{scoreStage?: string, baselineByTeamId?: Object}} [options] Etapa y estadísticas base acumuladas de fase previa.
    */
   function computeStandings(teams, matches, options) {
     const scoreStage = options && options.scoreStage;
+    const baselineByTeamId = options && options.baselineByTeamId && typeof options.baselineByTeamId === 'object'
+      ? options.baselineByTeamId
+      : null;
     const scopedMatches = (Array.isArray(matches) ? matches : []).filter(function (match) {
       return match && !match.archived && Boolean(scoring.resolveMatchScore(match));
     });
     return teams.map(function (team) {
+      const base = baselineByTeamId && baselineByTeamId[team.id]
+        ? normalizeCarriedStats(baselineByTeamId[team.id])
+        : null;
       const teamMatches = scopedMatches.filter(function (match) { return involves(match, team.id); });
       const setStats = setStatsFor(team.id, scopedMatches);
-      const classificationPoints = classificationPointsFor(team.id, scopedMatches);
-      let wins = 0;
-      let losses = 0;
-      let won20 = 0;
-      let won21 = 0;
-      let lost02 = 0;
-      let lost12 = 0;
-      let setWins = 0;
-      let setLosses = 0;
+      const matchPoints = classificationPointsFor(team.id, scopedMatches);
+      let wins = base ? base.wins : 0;
+      let losses = base ? base.losses : 0;
+      let won20 = base ? base.won20 : 0;
+      let won21 = base ? base.won21 : 0;
+      let lost02 = base ? base.lost02 : 0;
+      let lost12 = base ? base.lost12 : 0;
+      let setWins = base ? base.setWins : 0;
+      let setLosses = base ? base.setLosses : 0;
       teamMatches.forEach(function (match) {
         const isWinner = match.winnerId === team.id;
         const score = scoring.resolveMatchScore(match);
@@ -169,11 +247,14 @@
           }
         }
       });
-      const setRatio = setLosses > 0 ? (setWins / setLosses) : (setWins > 0 ? 1000 + setWins : 0);
-      const ptosRatio = setStats.against > 0 ? (setStats.for / setStats.against) : (setStats.for > 0 ? 1000 + setStats.for : 0);
+      const classificationPoints = (base ? base.classificationPoints : 0) + matchPoints;
+      const pointsFor = (base ? base.pointsFor : 0) + setStats.for;
+      const pointsAgainst = (base ? base.pointsAgainst : 0) + setStats.against;
+      const setRatio = computeSetRatio(setWins, setLosses);
+      const ptosRatio = computePointsRatio(pointsFor, pointsAgainst);
       return {
         team,
-        resultCount: teamMatches.length,
+        resultCount: (base ? base.resultCount : 0) + teamMatches.length,
         wins,
         losses,
         won20,
@@ -184,9 +265,9 @@
         classificationPoints,
         scorePoints: calculateTeamStageTotal(team, scoreStage),
         totalPoints: calculateTeamTotal(team),
-        pointsFor: setStats.for,
-        pointsAgainst: setStats.against,
-        difference: setStats.for - setStats.against,
+        pointsFor,
+        pointsAgainst,
+        difference: pointsFor - pointsAgainst,
         setWins,
         setLosses,
         setRatio,
@@ -243,6 +324,9 @@
     compareRows,
     sameRanking,
     rankingKey,
+    emptyCarriedStats,
+    normalizeCarriedStats,
+    toCarriedStats,
     computeStandings,
     tieSignature,
     rankWithTies

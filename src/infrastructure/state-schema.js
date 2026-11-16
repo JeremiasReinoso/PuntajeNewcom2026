@@ -17,12 +17,17 @@
 (function (root, factory) {
   'use strict';
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('../domain/constants.js'), require('../domain/scoring.js'), require('../domain/tournament.js'));
+    module.exports = factory(
+      require('../domain/constants.js'),
+      require('../domain/scoring.js'),
+      require('../domain/standings.js'),
+      require('../domain/tournament.js')
+    );
   } else {
     const modules = root.PuntajeNewcomModules;
-    modules.stateSchema = factory(modules.constants, modules.scoring, modules.tournament);
+    modules.stateSchema = factory(modules.constants, modules.scoring, modules.standings, modules.tournament);
   }
-}(typeof globalThis !== 'undefined' ? globalThis : this, function (constants, scoring, tournament) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (constants, scoring, standings, tournament) {
   'use strict';
 
   const { STAGES, STATUS, ZONE_STATUS, FORMATS, SCHEMA_VERSION } = constants;
@@ -82,7 +87,11 @@
       qualified: Array.isArray(raw.qualified) ? raw.qualified.filter(function (q) {
         return q && teamIds[q.teamId] && typeof q.sourceZoneId === 'string';
       }).map(function (q) {
-        return { teamId: q.teamId, sourceZoneId: q.sourceZoneId, position: Number.isInteger(q.position) ? q.position : null };
+        const entry = { teamId: q.teamId, sourceZoneId: q.sourceZoneId, position: Number.isInteger(q.position) ? q.position : null };
+        if (q.carriedStats && typeof q.carriedStats === 'object') {
+          entry.carriedStats = standings.normalizeCarriedStats(q.carriedStats);
+        }
+        return entry;
       }) : [],
       confirmedAt: raw.confirmedAt || null,
       qualificationUpdatedAt: raw.qualificationUpdatedAt || null,
@@ -200,6 +209,25 @@
           notes.push('Categoría "' + category.name + '" conserva su estructura de zonas; puede convertirse manualmente a zona única.');
         }
       }
+    });
+
+    normalizedCategories.forEach(function (category) {
+      const f = category.zoneTournament;
+      if (tournament.isSingleZoneFormat(category) || !f.secondStageZoneId || !f.qualified.length) return;
+      const catMatches = matchResults.filter(function (match) { return match.categoryId === category.id && !match.archived; });
+      f.qualified.forEach(function (q) {
+        const team = teams.filter(function (t) { return t.id === q.teamId; })[0];
+        const generalMatches = catMatches.filter(function (match) {
+          if (match.stage !== STAGES.GENERAL) return false;
+          if (match.winnerId !== q.teamId && match.loserId !== q.teamId) return false;
+          return !q.sourceZoneId || !match.zoneId || match.zoneId === q.sourceZoneId;
+        });
+        if (generalMatches.length > 0 && team) {
+          q.carriedStats = standings.toCarriedStats(standings.computeStandings([team], generalMatches, { scoreStage: STAGES.GENERAL })[0]);
+        } else if (!q.carriedStats) {
+          q.carriedStats = standings.emptyCarriedStats();
+        }
+      });
     });
 
     const selected = typeof raw.selectedCategoryId === 'string' && categoryIds[raw.selectedCategoryId]

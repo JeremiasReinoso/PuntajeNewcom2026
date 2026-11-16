@@ -152,10 +152,70 @@
     return (flow(category).tieBreaks || []).filter(function (item) { return item.scope === scope; });
   }
 
+  function isFinalAccumulatedScope(category, stage, zoneId) {
+    if (!category || isSingleZoneFormat(category)) return false;
+    const f = flow(category);
+    if (!f.secondStageZoneId) return false;
+    const effectiveStage = stage || (zoneId ? stageForZone(category, zoneId) : undefined);
+    if (effectiveStage !== STAGES.ZONE_FINAL) return false;
+    return !zoneId || zoneId === f.secondStageZoneId;
+  }
+
+  function teamGeneralMatches(ctx, teamId, sourceZoneId) {
+    return liveMatches(ctx.matches).filter(function (match) {
+      if (match.stage !== STAGES.GENERAL) return false;
+      if (match.winnerId !== teamId && match.loserId !== teamId) return false;
+      return !sourceZoneId || !match.zoneId || match.zoneId === sourceZoneId;
+    });
+  }
+
+  function qualifiedTeamBaseline(ctx, qualifiedEntry) {
+    if (!ctx || !qualifiedEntry || !qualifiedEntry.teamId) return standings.emptyCarriedStats();
+    const team = ctx.teams.filter(function (t) { return t.id === qualifiedEntry.teamId; })[0];
+    const generalMatches = teamGeneralMatches(ctx, qualifiedEntry.teamId, qualifiedEntry.sourceZoneId);
+    if (generalMatches.length > 0 && team) {
+      return standings.toCarriedStats(standings.computeStandings([team], generalMatches, { scoreStage: STAGES.GENERAL })[0]);
+    }
+    if (qualifiedEntry.carriedStats) {
+      return standings.normalizeCarriedStats(qualifiedEntry.carriedStats);
+    }
+    return standings.emptyCarriedStats();
+  }
+
+  /** Mapa de estadísticas acumuladas transferidas desde la fase clasificatoria por `teamId`. */
+  function qualifiedBaselineMap(ctx) {
+    const map = {};
+    if (!ctx || !ctx.category || isSingleZoneFormat(ctx.category)) return map;
+    const f = flow(ctx.category);
+    (f.qualified || []).forEach(function (q) {
+      if (q && q.teamId) map[q.teamId] = qualifiedTeamBaseline(ctx, q);
+    });
+    return map;
+  }
+
+  /** Recalcula y sincroniza `carriedStats` en `category.zoneTournament.qualified`. MUTA `category`. */
+  function syncCarriedStats(ctx) {
+    const f = flow(ctx && ctx.category);
+    if (!ctx || !ctx.category || isSingleZoneFormat(ctx.category) || !f.secondStageZoneId || !Array.isArray(f.qualified)) return;
+    f.qualified.forEach(function (q) {
+      const team = ctx.teams.filter(function (t) { return t.id === q.teamId; })[0];
+      if (!team) {
+        q.carriedStats = standings.emptyCarriedStats();
+        return;
+      }
+      const generalMatches = teamGeneralMatches(ctx, q.teamId, q.sourceZoneId);
+      q.carriedStats = standings.toCarriedStats(standings.computeStandings([team], generalMatches, { scoreStage: STAGES.GENERAL })[0]);
+    });
+  }
+
   /** Tabla de una zona con empates detectados y resoluciones manuales aplicadas. */
   function zoneRanking(ctx, zone, stage) {
     const matches = scopeMatches(ctx, stage, zone.id);
-    const rows = standings.computeStandings(zoneTeams(ctx, zone), matches, { scoreStage: stage });
+    const options = { scoreStage: stage };
+    if (isFinalAccumulatedScope(ctx.category, stage, zone.id)) {
+      options.baselineByTeamId = qualifiedBaselineMap(ctx);
+    }
+    const rows = standings.computeStandings(zoneTeams(ctx, zone), matches, options);
     const ranked = standings.rankWithTies(rows, tieResolutions(ctx.category, scopeKey(stage, zone.id)), matches);
     return Object.assign(ranked, { scope: scopeKey(stage, zone.id), stage, zoneId: zone.id });
   }
@@ -205,7 +265,7 @@
 
   /**
    * Clasificación completa de la primera etapa.
-   * @returns {{zones: Array, issues: string[], ready: boolean, qualifiers: Array<{teamId, sourceZoneId, position}>}}
+   * @returns {{zones: Array, issues: string[], ready: boolean, qualifiers: Array<{teamId, sourceZoneId, position, carriedStats}>}}
    */
   function computeQualification(ctx) {
     const zones = initialZones(ctx.category).map(function (zone) { return zoneQualification(ctx, zone); });
@@ -216,7 +276,13 @@
     const qualifiers = [];
     zones.forEach(function (zq) {
       zq.qualifierIds.forEach(function (teamId, index) {
-        qualifiers.push({ teamId, sourceZoneId: zq.zone.id, position: index + 1 });
+        const row = zq.ranking.rows[index];
+        qualifiers.push({
+          teamId,
+          sourceZoneId: zq.zone.id,
+          position: index + 1,
+          carriedStats: standings.toCarriedStats(row)
+        });
       });
     });
     const unique = {};
@@ -349,6 +415,9 @@
     zoneTeams,
     pairKey,
     zoneProgress,
+    isFinalAccumulatedScope,
+    qualifiedBaselineMap,
+    syncCarriedStats,
     zoneRanking,
     zoneQualification,
     assignmentIssues,
