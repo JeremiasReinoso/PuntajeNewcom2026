@@ -1174,6 +1174,8 @@
   function matchesPage(){
     var c=category(),single=isSingleZoneCategory(c);
     var all=categoryMatches(c.id).slice().sort(function(a,b){return (a.stage===STAGES.ZONE_FINAL?1:0)-(b.stage===STAGES.ZONE_FINAL?1:0)||a.id.localeCompare(b.id);});
+    var matchNumbers={};
+    all.forEach(function(match,index){matchNumbers[match.id]=index+1;});
     var zones=zoneFlow(c).zones;
     var rows=all.filter(function(match){
       var matchPhase=match.stage===STAGES.ZONE_FINAL?ZONE_PHASES.FINAL:ZONE_PHASES.QUALIFYING;
@@ -1188,14 +1190,14 @@
         '<strong>'+rows.length+' partido'+(rows.length===1?'':'s')+'</strong>'+
       '</section>'+
       '<section class="card match-board"><div class="table-wrap"><table class="table official-matches-table"><thead><tr><th>P</th><th>ZONA / FASE</th><th>EQUIPO</th><th>RES.</th><th>SET 1</th><th>SET 2</th><th>SET 3</th><th>ACCIONES</th></tr></thead><tbody>'+
-      (rows.length?rows.map(function(match,index){
+      (rows.length?rows.map(function(match){
         var w=teamById(match.winnerId),l=teamById(match.loserId),sets=matchSetsFor(match);
         var wSets=2,lSets=match.score==='2-1'?1:0;
         var s1w=sets[0]?sets[0].a:0,s1l=sets[0]?sets[0].b:0;
         var s2w=sets[1]?sets[1].a:0,s2l=sets[1]?sets[1].b:0;
         var s3w=sets[2]?sets[2].a:0,s3l=sets[2]?sets[2].b:0;
         return'<tr class="match-row-winner">'+
-            '<td rowspan="2" class="match-p-cell"><strong>P'+(index+1)+'</strong></td>'+
+            '<td rowspan="2" class="match-p-cell"><strong>'+matchNumbers[match.id]+'</strong></td>'+
             '<td rowspan="2" class="match-zone-cell"><strong>'+esc(matchZoneLabel(c,match))+'</strong><small>'+esc(matchStageLabel(c,match))+'</small></td>'+
             '<td class="match-team-cell is-winner"><strong>'+esc(w?w.name:'Equipo')+'</strong></td>'+
             '<td class="match-res-cell is-winner"><b>'+wSets+'</b></td>'+
