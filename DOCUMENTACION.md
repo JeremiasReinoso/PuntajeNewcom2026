@@ -38,7 +38,6 @@ PuntajeNewcom2026/
 ├── index.html                                 # Punto de entrada Web (SPA Host)
 ├── app.js                                     # Cliente Frontend Monolítico Reactivo (UI + State)
 ├── styles.css                                 # Sistema de diseño, temas y hojas de estilo oficiales
-├── Presentacion_Torneo_Aguilas_Doradas.pdf    # Dossier informativo oficial en PDF para el club
 │
 ├── src/                                       # Capas modulares de Clean Architecture (UMD)
 │   ├── domain/                                # Reglas puras del negocio (sin DOM ni I/O)
