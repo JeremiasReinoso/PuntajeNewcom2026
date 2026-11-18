@@ -70,16 +70,16 @@ function mountApp() {
 }
 
 function extractRenderedMatches(html) {
-  const regex = /<tr class="match-row-winner"><td rowspan="2" class="match-p-cell"><strong>([^<]+)<\/strong><\/td><td rowspan="2" class="match-zone-cell"><strong>([^<]+)<\/strong><small>([^<]+)<\/small><\/td><td class="match-team-cell is-winner"><strong>([^<]+)<\/strong><\/td>.*?data-action="edit-match" data-id="([^"]+)"/g;
+  const regex = /<tr class="match-row-winner" data-match-id="([^"]+)"><td rowspan="2" class="match-p-cell"><strong>([^<]+)<\/strong><\/td><td rowspan="2" class="match-zone-cell"><strong>([^<]+)<\/strong><small>([^<]+)<\/small><\/td><td class="match-team-cell is-winner"><strong>([^<]+)<\/strong><\/td>/g;
   const rows = [];
   let match;
   while ((match = regex.exec(html)) !== null) {
     rows.push({
-      pCell: match[1],
-      zone: match[2],
-      phase: match[3],
-      winner: match[4],
-      matchId: match[5]
+      matchId: match[1],
+      pCell: match[2],
+      zone: match[3],
+      phase: match[4],
+      winner: match[5]
     });
   }
   return rows;
@@ -120,8 +120,18 @@ describe('Columna P en Partidos Jugados', () => {
     api.addMatchFromSets(a[1].id, 2, b[1].id, 0, sets20, finalZoneId);
 
     handlers.views.matches();
-    assert.match(appNode.innerHTML, /<thead><tr><th>P<\/th>/);
+    assert.match(
+      appNode.innerHTML,
+      /<thead><tr><th>P<\/th><th>ZONA \/ FASE<\/th><th>EQUIPO<\/th><th>RES\.<\/th><th>SET 1<\/th><th>SET 2<\/th><th>SET 3<\/th><\/tr><\/thead>/
+    );
     assert.doesNotMatch(appNode.innerHTML, /class="match-p-cell"><strong>P\d+<\/strong>/);
+    assert.doesNotMatch(appNode.innerHTML, /<th>ACCIONES<\/th>/);
+    assert.doesNotMatch(appNode.innerHTML, /ACCIONES/);
+    assert.doesNotMatch(appNode.innerHTML, /match-actions-cell/);
+    assert.doesNotMatch(appNode.innerHTML, /data-action="edit-match"/);
+    assert.doesNotMatch(appNode.innerHTML, /data-action="delete-match"/);
+    assert.doesNotMatch(appNode.innerHTML, />Editar</);
+    assert.doesNotMatch(appNode.innerHTML, />Deshacer</);
 
     const allRows = extractRenderedMatches(appNode.innerHTML);
     assert.equal(allRows.length, 14);
@@ -160,5 +170,15 @@ describe('Columna P en Partidos Jugados', () => {
     const finalRows = extractRenderedMatches(appNode.innerHTML);
     assert.equal(finalRows.length, 2);
     assert.deepEqual(finalRows.map((r) => r.pCell), ['13', '14']);
+    assert.doesNotMatch(appNode.innerHTML, /ACCIONES|>Editar<|>Deshacer</);
+
+    // Combinación de filtros sin partidos: colspan="7" para las 7 columnas restantes
+    handlers.zoneFilter(zA.id);
+    assert.match(appNode.innerHTML, /<tr><td colspan="7"><div class="empty">/);
+
+    // La vista Cargar resultado sigue conservando sus controles de edición y deshacer
+    handlers.views.results();
+    assert.match(appNode.innerHTML, /data-action="edit-match"/);
+    assert.match(appNode.innerHTML, /data-action="delete-match"/);
   });
 });

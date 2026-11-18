@@ -294,18 +294,22 @@ main { max-width: 1260px; margin: auto; padding: 30px 36px 48px; }
 .match-board { margin-top: 14px; padding: 0; overflow: hidden; }
 .official-matches-table { min-width: 760px; font-variant-numeric: tabular-nums; }
 .official-matches-table thead th { background: var(--green); color: #fff; font-size: 11px; font-weight: 800; padding: 10px 10px; text-align: center; }
-.official-matches-table thead th:nth-child(2), .official-matches-table thead th:nth-child(3) { text-align: left; }
+.official-matches-table thead th:nth-child(1) { width: 56px; }
+.official-matches-table thead th:nth-child(2) { width: 24%; text-align: left; }
+.official-matches-table thead th:nth-child(3) { text-align: left; }
+.official-matches-table thead th:nth-child(4) { width: 72px; }
+.official-matches-table thead th:nth-child(5),
+.official-matches-table thead th:nth-child(6),
+.official-matches-table thead th:nth-child(7) { width: 88px; }
 .official-matches-table td { padding: 9px 10px; text-align: center; border-bottom: 1px solid var(--line); }
-.official-matches-table .match-p-cell { background: var(--grey-block); font-weight: 800; width: 48px; border-right: 1px solid var(--line); }
+.official-matches-table .match-p-cell { background: var(--grey-block); font-weight: 800; width: 56px; border-right: 1px solid var(--line); }
 .official-matches-table .match-zone-cell { text-align: left; border-right: 1px solid var(--line); }
 .official-matches-table .match-zone-cell small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
 .official-matches-table .match-team-cell { text-align: left; text-transform: uppercase; }
 .official-matches-table .match-team-cell.is-winner { color: var(--green); }
-.official-matches-table .match-res-cell { font-weight: 700; background: var(--soft); width: 54px; }
+.official-matches-table .match-res-cell { font-weight: 700; background: var(--soft); width: 72px; }
 .official-matches-table .match-res-cell.is-winner { background: var(--green-soft); color: var(--green); }
 .official-matches-table .match-row-loser td { border-bottom: 2px solid var(--line); }
-.official-matches-table .match-actions-cell { border-left: 1px solid var(--line); white-space: nowrap; }
-.official-matches-table .match-actions-cell button + button { margin-left: 12px; }
 
 /* Avisos y Modal */
 .notice { padding: 11px 14px; border-radius: 9px; margin: 0 0 16px; font-size: 13px; font-weight: 600; }

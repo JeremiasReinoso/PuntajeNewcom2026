@@ -1173,7 +1173,8 @@
 
   function matchesPage(){
     var c=category(),single=isSingleZoneCategory(c);
-    var all=categoryMatches(c.id).slice().sort(function(a,b){return (a.stage===STAGES.ZONE_FINAL?1:0)-(b.stage===STAGES.ZONE_FINAL?1:0)||a.id.localeCompare(b.id);});
+    var baseOrder=categoryMatches(c.id);
+    var all=baseOrder.slice().sort(function(a,b){return (a.stage===STAGES.ZONE_FINAL?1:0)-(b.stage===STAGES.ZONE_FINAL?1:0)||(baseOrder.indexOf(a)-baseOrder.indexOf(b));});
     var matchNumbers={};
     all.forEach(function(match,index){matchNumbers[match.id]=index+1;});
     var zones=zoneFlow(c).zones;
@@ -1183,33 +1184,32 @@
       var zoneOk=matchZoneFilter==='ALL'||match.zoneId===matchZoneFilter;
       return phaseOk&&zoneOk;
     });
-    return'<div class="toolbar"><div><p class="eyebrow">PASO 4 · PLANILLA DE RESULTADOS</p><h2>Partidos Jugados</h2><p class="desc">Detalle de cada partido por sets. Podés filtrar por fase y por zona, editar o deshacer cualquier carga.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
+    return'<div class="toolbar"><div><p class="eyebrow">PASO 4 · PLANILLA DE RESULTADOS</p><h2>Partidos Jugados</h2><p class="desc">Detalle de cada partido por sets. Podés filtrar por fase y por zona.</p></div><button class="primary" data-view="results">＋ Cargar partido</button></div>'+
       '<section class="card match-filters">'+
         (!single?'<label>Fase<select data-action="match-phase-filter"><option value="ALL">Todas las fases</option><option value="'+STAGES.GENERAL+'" '+(matchPhaseFilter===STAGES.GENERAL?'selected':'')+'>Fase clasificatoria</option><option value="'+STAGES.ZONE_FINAL+'" '+(matchPhaseFilter===STAGES.ZONE_FINAL?'selected':'')+'>Fase final (Zona final)</option></select></label>':'')+
         '<label>Zona<select data-action="match-zone-filter"><option value="ALL">Todas las zonas</option>'+zones.map(function(z){return'<option value="'+z.id+'" '+(matchZoneFilter===z.id?'selected':'')+'>'+esc(z.name)+'</option>';}).join('')+'</select></label>'+
         '<strong>'+rows.length+' partido'+(rows.length===1?'':'s')+'</strong>'+
       '</section>'+
-      '<section class="card match-board"><div class="table-wrap"><table class="table official-matches-table"><thead><tr><th>P</th><th>ZONA / FASE</th><th>EQUIPO</th><th>RES.</th><th>SET 1</th><th>SET 2</th><th>SET 3</th><th>ACCIONES</th></tr></thead><tbody>'+
+      '<section class="card match-board"><div class="table-wrap"><table class="table official-matches-table"><thead><tr><th>P</th><th>ZONA / FASE</th><th>EQUIPO</th><th>RES.</th><th>SET 1</th><th>SET 2</th><th>SET 3</th></tr></thead><tbody>'+
       (rows.length?rows.map(function(match){
         var w=teamById(match.winnerId),l=teamById(match.loserId),sets=matchSetsFor(match);
         var wSets=2,lSets=match.score==='2-1'?1:0;
         var s1w=sets[0]?sets[0].a:0,s1l=sets[0]?sets[0].b:0;
         var s2w=sets[1]?sets[1].a:0,s2l=sets[1]?sets[1].b:0;
         var s3w=sets[2]?sets[2].a:0,s3l=sets[2]?sets[2].b:0;
-        return'<tr class="match-row-winner">'+
+        return'<tr class="match-row-winner" data-match-id="'+esc(match.id)+'">'+
             '<td rowspan="2" class="match-p-cell"><strong>'+matchNumbers[match.id]+'</strong></td>'+
             '<td rowspan="2" class="match-zone-cell"><strong>'+esc(matchZoneLabel(c,match))+'</strong><small>'+esc(matchStageLabel(c,match))+'</small></td>'+
             '<td class="match-team-cell is-winner"><strong>'+esc(w?w.name:'Equipo')+'</strong></td>'+
             '<td class="match-res-cell is-winner"><b>'+wSets+'</b></td>'+
             '<td>'+s1w+'</td><td>'+s2w+'</td><td>'+s3w+'</td>'+
-            '<td rowspan="2" class="match-actions-cell"><button type="button" class="link" data-action="edit-match" data-id="'+match.id+'">Editar</button><button type="button" class="link danger" data-action="delete-match" data-id="'+match.id+'">Deshacer</button></td>'+
           '</tr>'+
           '<tr class="match-row-loser">'+
             '<td class="match-team-cell">'+esc(l?l.name:'Equipo')+'</td>'+
             '<td class="match-res-cell">'+lSets+'</td>'+
             '<td>'+s1l+'</td><td>'+s2l+'</td><td>'+s3l+'</td>'+
           '</tr>';
-      }).join(''):'<tr><td colspan="8"><div class="empty"><p>Todavía no hay partidos cargados para este filtro.</p></div></td></tr>')+
+      }).join(''):'<tr><td colspan="7"><div class="empty"><p>Todavía no hay partidos cargados para este filtro.</p></div></td></tr>')+
       '</tbody></table></div></section>';
   }
 
