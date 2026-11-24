@@ -1,17 +1,20 @@
 /**
- * Reglas del torneo por etapas: zonas iniciales, clasificados, zona única y
- * clasificación final. También define la modalidad +60/+68 (zona única directa).
+ * Reglas del torneo por etapas:
+ *  - Modalidad A (`zonas_y_final`): Zonas clasificatorias → 2 por zona → Zona final (+40 / genérico).
+ *  - Modalidad B (`todos_contra_todos`): Zona única directa (genérico).
+ *  - Torneo +50 (`torneo_50`, 14 equipos):
+ *      Fase 1 (Viernes): Zona A (4), Zona B (4), Zona C (3 + Interzonal), Zona D (3 + Interzonal) + Selector Interzonal C-D (3 cruces).
+ *      Fase 2 (Sábado / Dom.): Ronda Campeonato Zona 1 (1°A,1°B,2°C,2°D) y Zona 2 (1°C,1°D,2°A,2°B); Ronda Estímulo Zona 3 (3°/4° de cada zona, 6 equipos → 9°–14°).
+ *      Fase 3 (Domingo): Semifinal 1 (1°Z1 vs 2°Z2), Semifinal 2 (1°Z2 vs 2°Z1), Final (1°/2°), 3°/4°, 5°/6° (3°Z1 vs 3°Z2), 7°/8° (4°Z1 vs 4°Z2).
+ *  - Torneo +60 (`torneo_60`, 18 equipos):
+ *      Fase 1 (Viernes y Sábado): 3 zonas de 6 equipos (Zonas A, B y C).
+ *      Fase 2 (Domingo mañana): Zona 1 (1°A,2°B,1°C), Zona 2 (2°A,1°B,2°C), Zona 3 (3°s → 7°–9°), Zona 4 (4°s → 10°–12°), Zona 5 (5°s → 13°–15°), Zona 6 (6°s → 16°–18°).
+ *      Fase 3 (Domingo tarde): Semifinal 1 (1°Z1 vs 2°Z2), Semifinal 2 (1°Z2 vs 2°Z1), Final (1°/2°), 3°/4°, 5°/6° (3°Z1 vs 3°Z2).
+ *  - Torneo +68 (`torneo_68`, 8 equipos):
+ *      Fase 1 (Días 1 y 2): Zona Única (8 equipos, 28 partidos) → Tabla General 1°–8°.
+ *      Fase 2 (Día 3): Semifinal 1 (1° vs 4°), Semifinal 2 (2° vs 3°), Gran Final (1°/2°), 3°/4°; puestos 5°–8° directos por tabla.
  *
- * Todo se DERIVA de los resultados registrados: no hay contadores mutables, no se
- * generan partidos, cruces, fixtures ni "partidos pendientes". La completitud de
- * una zona sólo se mide contando cuántos enfrentamientos distintos tienen
- * resultado frente a los n·(n−1)/2 necesarios de un todos contra todos.
- *
- * Contexto (`ctx`) que reciben las funciones de consulta:
- *   { category, teams: equipos de la categoría, matches: resultados de la categoría }
- *
- * Capa: domain. Las consultas son puras. Las funciones `create*`/`convert*`
- * documentan explícitamente cuando mutan el agregado recibido.
+ * Capa: domain. Las consultas son puras.
  */
 (function (root, factory) {
   'use strict';
@@ -24,13 +27,34 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function (constants, standings) {
   'use strict';
 
-  const { STAGES, STATUS, ZONE_STATUS, FORMATS, PHASES, PHASE_LABELS, QUALIFIERS_PER_ZONE } = constants;
+  const { STAGES, STATUS, ZONE_STATUS, ZONE_PHASES, FORMATS, PHASES, PHASE_LABELS, QUALIFIERS_PER_ZONE, MATCH_TYPES } = constants;
+
+  const TORNEO_50_SPEC = Object.freeze([
+    { code: 'A', name: 'Zona A', targetTeams: 4 },
+    { code: 'B', name: 'Zona B', targetTeams: 4 },
+    { code: 'C', name: 'Zona C', targetTeams: 3 },
+    { code: 'D', name: 'Zona D', targetTeams: 3 }
+  ]);
+
+  const TORNEO_60_SPEC = Object.freeze([
+    { code: 'A', name: 'Zona A', targetTeams: 6 },
+    { code: 'B', name: 'Zona B', targetTeams: 6 },
+    { code: 'C', name: 'Zona C', targetTeams: 6 }
+  ]);
+
+  function defaultInterzonals() {
+    return [
+      { slot: 1, teamCId: null, teamDId: null },
+      { slot: 2, teamCId: null, teamDId: null },
+      { slot: 3, teamCId: null, teamDId: null }
+    ];
+  }
 
   // ---------------------------------------------------------------------------
   // Estructura de la categoría
   // ---------------------------------------------------------------------------
 
-  /** Estado inicial de una categoría con zonas (Modalidad A). */
+  /** Estado inicial de una categoría con zonas. */
   function emptyZoneTournament() {
     return {
       status: ZONE_STATUS.CONFIGURING,
@@ -39,13 +63,14 @@
       zones: [],
       secondStageZoneId: null,
       qualified: [],
+      interzonals: defaultInterzonals(),
       confirmedAt: null,
       qualificationUpdatedAt: null,
       tieBreaks: []
     };
   }
 
-  /** Estado inicial de una categoría de zona única (Modalidad B, +60/+68). */
+  /** Estado inicial de una categoría de zona única (`todos_contra_todos` o `torneo_68`). */
   function singleZoneTournament(zone) {
     return Object.assign(emptyZoneTournament(), {
       status: ZONE_STATUS.IN_PROGRESS,
@@ -60,11 +85,27 @@
     return category && category.zoneTournament ? category.zoneTournament : emptyZoneTournament();
   }
 
-  function isSingleZoneFormat(category) {
-    return Boolean(category) && category.format === FORMATS.SINGLE_ZONE;
+  function isTorneo50(category) {
+    return Boolean(category) && category.format === FORMATS.TORNEO_50;
   }
 
-  /** Sugiere la modalidad según el nombre (las categorías "+60" y "+68" usan zona única). */
+  function isTorneo60(category) {
+    return Boolean(category) && category.format === FORMATS.TORNEO_60;
+  }
+
+  function isTorneo68(category) {
+    return Boolean(category) && category.format === FORMATS.TORNEO_68;
+  }
+
+  function isSingleZoneFormat(category) {
+    return Boolean(category) && (category.format === FORMATS.SINGLE_ZONE || category.format === FORMATS.TORNEO_68);
+  }
+
+  function hasPlayoffStageFormat(category) {
+    return isTorneo50(category) || isTorneo60(category) || isTorneo68(category);
+  }
+
+  /** Sugiere la modalidad según el nombre (retrocompatible: "+60"/"+68" → zona única salvo que se indique formato explícito). */
   function inferFormat(name) {
     return constants.SINGLE_ZONE_CATEGORY_PATTERN.test(String(name || '')) ? FORMATS.ROUND_ROBIN : FORMATS.ZONES_AND_FINAL;
   }
@@ -73,20 +114,46 @@
     return flow(category).zones.filter(function (zone) { return zone.id === zoneId; })[0] || null;
   }
 
-  /** Zonas de la primera etapa (excluye la zona única). */
-  function initialZones(category) {
+  function zoneByCode(category, code) {
     const f = flow(category);
-    return f.zones.filter(function (zone) { return zone.id !== f.secondStageZoneId; });
+    return f.zones.filter(function (zone) { return zone.code === code; })[0] ||
+      f.zones.filter(function (zone) { return zone.name.toLowerCase() === ('zona ' + code).toLowerCase(); })[0] || null;
   }
 
-  /** Zona única (segunda etapa en Modalidad A, o la única zona en +60/+68). */
+  /** Zonas de la primera etapa (excluye segunda etapa / zona única). */
+  function initialZones(category) {
+    const f = flow(category);
+    if (isSingleZoneFormat(category)) return [];
+    return f.zones.filter(function (zone) {
+      return zone.id !== f.secondStageZoneId && zone.phase === ZONE_PHASES.QUALIFYING;
+    });
+  }
+
+  /** Zonas de la segunda etapa (Zona final en +40; Zonas 1-3 en +50; Zonas 1-6 en +60; Zona única en +60/+68 genérico). */
+  function secondStageZones(category) {
+    const f = flow(category);
+    if (isSingleZoneFormat(category)) {
+      const z = finalZone(category);
+      return z ? [z] : [];
+    }
+    return f.zones.filter(function (zone) {
+      return zone.id === f.secondStageZoneId || zone.phase !== ZONE_PHASES.QUALIFYING;
+    });
+  }
+
+  /** Zona única o principal de segunda etapa. */
   function finalZone(category) {
     const f = flow(category);
-    return f.secondStageZoneId ? zoneById(category, f.secondStageZoneId) : null;
+    if (f.secondStageZoneId) return zoneById(category, f.secondStageZoneId);
+    return f.zones.filter(function (zone) { return zone.phase !== ZONE_PHASES.QUALIFYING; })[0] || null;
   }
 
   function isInitialZone(category, zoneId) {
     return initialZones(category).some(function (zone) { return zone.id === zoneId; });
+  }
+
+  function isSecondStageZone(category, zoneId) {
+    return secondStageZones(category).some(function (zone) { return zone.id === zoneId; });
   }
 
   /** Zona inicial a la que pertenece un equipo. */
@@ -97,7 +164,7 @@
   function stageForZone(category, zoneId) {
     if (isSingleZoneFormat(category)) return STAGES.ZONE_FINAL;
     const zone = zoneId ? zoneById(category, zoneId) : null;
-    if ((zoneId && zoneId === flow(category).secondStageZoneId) || (zone && zone.phase === constants.ZONE_PHASES.FINAL)) {
+    if ((zoneId && zoneId === flow(category).secondStageZoneId) || (zone && zone.phase !== ZONE_PHASES.QUALIFYING)) {
       return STAGES.ZONE_FINAL;
     }
     return STAGES.GENERAL;
@@ -107,17 +174,154 @@
     return stage + '|' + zoneId;
   }
 
+  function zoneTargetTeams(category, zone) {
+    if (!category || !zone) return null;
+    if (typeof zone.targetTeams === 'number' && zone.targetTeams > 0) return zone.targetTeams;
+    if (isTorneo50(category)) {
+      const found50 = TORNEO_50_SPEC.filter(function (s) { return s.code === zone.code || s.name.toLowerCase() === zone.name.toLowerCase(); })[0];
+      if (found50) return found50.targetTeams;
+      if (zone.code === '1' || zone.code === '2') return 4;
+      if (zone.code === '3') return 6;
+    }
+    if (isTorneo60(category)) {
+      if (zone.phase === ZONE_PHASES.QUALIFYING) return 6;
+      return 3;
+    }
+    if (isTorneo68(category)) return 8;
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
-  // Resultados, progreso y tablas por zona
+  // Resultados, progreso e Interzonal C-D
   // ---------------------------------------------------------------------------
 
-  /** Resultados vigentes (los archivados por cambio de clasificados no cuentan). */
+  /** Resultados vigentes (los archivados no cuentan). */
   function liveMatches(matches) {
-    return matches.filter(function (match) { return !match.archived; });
+    return (Array.isArray(matches) ? matches : []).filter(function (match) { return match && !match.archived; });
+  }
+
+  function interzonalSlots(category) {
+    const raw = Array.isArray(flow(category).interzonals) ? flow(category).interzonals : [];
+    const bySlot = {};
+    raw.forEach(function (item) {
+      if (item && (item.slot === 1 || item.slot === 2 || item.slot === 3)) {
+        bySlot[item.slot] = {
+          slot: item.slot,
+          teamCId: typeof item.teamCId === 'string' && item.teamCId ? item.teamCId : null,
+          teamDId: typeof item.teamDId === 'string' && item.teamDId ? item.teamDId : null
+        };
+      }
+    });
+    return [1, 2, 3].map(function (slot) {
+      return bySlot[slot] || { slot, teamCId: null, teamDId: null };
+    });
+  }
+
+  function interzonalZones(category) {
+    if (!isTorneo50(category)) return { zoneC: null, zoneD: null };
+    return { zoneC: zoneByCode(category, 'C'), zoneD: zoneByCode(category, 'D') };
+  }
+
+  function isInterzonalZone(category, zone) {
+    if (!isTorneo50(category) || !zone) return false;
+    const { zoneC, zoneD } = interzonalZones(category);
+    return (zoneC && zone.id === zoneC.id) || (zoneD && zone.id === zoneD.id);
+  }
+
+  function interzonalMatches(ctx) {
+    return liveMatches(ctx && ctx.matches).filter(function (match) {
+      return match.stage === STAGES.GENERAL && match.matchType === MATCH_TYPES.INTERZONAL;
+    });
+  }
+
+  function interzonalMatchForSlot(ctx, slot, pairing) {
+    const matches = interzonalMatches(ctx);
+    const bySlot = matches.filter(function (m) { return m.interzonalSlot === slot; })[0];
+    if (bySlot) return bySlot;
+    if (pairing && pairing.teamCId && pairing.teamDId) {
+      const key = pairKey(pairing.teamCId, pairing.teamDId);
+      return matches.filter(function (m) { return pairKey(m.winnerId, m.loserId) === key; })[0] || null;
+    }
+    return null;
+  }
+
+  /**
+   * Estado completo del selector Interzonal C-D en Categoría +50:
+   * - 3 enfrentamientos (slot 1..3), cada equipo de C y de D exactamente una vez.
+   * - Qué equipos están asignados y cuáles pendientes.
+   * - Qué cruces ya tienen resultado cargado.
+   */
+  function interzonalStatus(ctx) {
+    const category = ctx && ctx.category;
+    const { zoneC, zoneD } = interzonalZones(category);
+    const teamsC = zoneC ? zoneTeams(ctx, zoneC) : [];
+    const teamsD = zoneD ? zoneTeams(ctx, zoneD) : [];
+    const teamMap = {};
+    (ctx && ctx.teams || []).forEach(function (t) { teamMap[t.id] = t; });
+    const slots = interzonalSlots(category).map(function (item) {
+      const teamC = item.teamCId && zoneC && zoneC.teamIds.indexOf(item.teamCId) >= 0 ? (teamMap[item.teamCId] || null) : null;
+      const teamD = item.teamDId && zoneD && zoneD.teamIds.indexOf(item.teamDId) >= 0 ? (teamMap[item.teamDId] || null) : null;
+      const assigned = Boolean(teamC && teamD);
+      const match = assigned ? interzonalMatchForSlot(ctx, item.slot, { teamCId: teamC.id, teamDId: teamD.id }) : null;
+      return {
+        slot: item.slot,
+        teamCId: teamC ? teamC.id : null,
+        teamDId: teamD ? teamD.id : null,
+        teamC,
+        teamD,
+        assigned,
+        match,
+        played: Boolean(match)
+      };
+    });
+
+    const assignedCMap = {};
+    const assignedDMap = {};
+    slots.forEach(function (s) {
+      if (s.teamCId) assignedCMap[s.teamCId] = true;
+      if (s.teamDId) assignedDMap[s.teamDId] = true;
+    });
+
+    const assignedC = teamsC.filter(function (t) { return assignedCMap[t.id]; });
+    const pendingC = teamsC.filter(function (t) { return !assignedCMap[t.id]; });
+    const assignedD = teamsD.filter(function (t) { return assignedDMap[t.id]; });
+    const pendingD = teamsD.filter(function (t) { return !assignedDMap[t.id]; });
+    const assignedCount = slots.filter(function (s) { return s.assigned; }).length;
+    const playedCount = slots.filter(function (s) { return s.played; }).length;
+    const allAssigned = teamsC.length === 3 && teamsD.length === 3 && assignedCount === 3 && pendingC.length === 0 && pendingD.length === 0;
+    const allPlayed = allAssigned && playedCount === 3;
+
+    return {
+      applicable: isTorneo50(category),
+      zoneC,
+      zoneD,
+      teamsC,
+      teamsD,
+      slots,
+      assignedC,
+      pendingC,
+      assignedD,
+      pendingD,
+      assignedCount,
+      playedCount,
+      allAssigned,
+      allPlayed
+    };
   }
 
   function scopeMatches(ctx, stage, zoneId) {
-    return liveMatches(ctx.matches).filter(function (match) { return match.stage === stage && match.zoneId === zoneId; });
+    const live = liveMatches(ctx.matches);
+    const zone = zoneId ? zoneById(ctx.category, zoneId) : null;
+    if (stage === STAGES.GENERAL && isTorneo50(ctx.category) && isInterzonalZone(ctx.category, zone)) {
+      const members = {};
+      zone.teamIds.forEach(function (id) { members[id] = true; });
+      return live.filter(function (match) {
+        if (match.stage !== STAGES.GENERAL) return false;
+        if (match.zoneId === zoneId) return true;
+        return match.matchType === MATCH_TYPES.INTERZONAL && (members[match.winnerId] || members[match.loserId]);
+      });
+    }
+    return live.filter(function (match) { return match.stage === stage && match.zoneId === zoneId; });
   }
 
   function zoneTeams(ctx, zone) {
@@ -132,20 +336,42 @@
   }
 
   /**
-   * Progreso de un todos contra todos: cuántos enfrentamientos distintos entre
-   * integrantes de la zona tienen resultado. NO enumera cuáles faltan.
+   * Progreso de un todos contra todos (e interzonales en Zona C / D de +50).
    */
   function zoneProgress(ctx, zone, stage) {
     const members = {};
     zone.teamIds.forEach(function (id) { members[id] = true; });
-    const pairs = {};
+    const internalPairs = {};
+    const interzonalPairs = {};
     scopeMatches(ctx, stage, zone.id).forEach(function (match) {
-      if (members[match.winnerId] && members[match.loserId]) pairs[pairKey(match.winnerId, match.loserId)] = true;
+      if (match.matchType === MATCH_TYPES.INTERZONAL && (members[match.winnerId] || members[match.loserId])) {
+        interzonalPairs[pairKey(match.winnerId, match.loserId)] = true;
+      } else if (members[match.winnerId] && members[match.loserId]) {
+        internalPairs[pairKey(match.winnerId, match.loserId)] = true;
+      }
     });
     const teamCount = zone.teamIds.length;
-    const required = teamCount * (teamCount - 1) / 2;
-    const played = Object.keys(pairs).length;
-    return { teamCount, required, played, missing: Math.max(0, required - played), complete: teamCount >= 2 && played === required };
+    const internalRequired = teamCount * (teamCount - 1) / 2;
+    const internalPlayed = Object.keys(internalPairs).length;
+    const hasInterzonal = stage === STAGES.GENERAL && isTorneo50(ctx.category) && isInterzonalZone(ctx.category, zone);
+    const interzonalRequired = hasInterzonal ? 3 : 0;
+    const interzonalPlayed = hasInterzonal ? Object.keys(interzonalPairs).length : 0;
+    const required = internalRequired + interzonalRequired;
+    const played = internalPlayed + interzonalPlayed;
+    const targetTeams = zoneTargetTeams(ctx.category, zone);
+    const teamCountOk = targetTeams ? teamCount === targetTeams : teamCount >= 2;
+    return {
+      teamCount,
+      targetTeams,
+      required,
+      played,
+      missing: Math.max(0, required - played),
+      internalRequired,
+      internalPlayed,
+      interzonalRequired,
+      interzonalPlayed,
+      complete: teamCountOk && played === required
+    };
   }
 
   function tieResolutions(category, scope) {
@@ -154,17 +380,17 @@
 
   function isFinalAccumulatedScope(category, stage, zoneId) {
     if (!category || isSingleZoneFormat(category)) return false;
-    const f = flow(category);
-    if (!f.secondStageZoneId) return false;
     const effectiveStage = stage || (zoneId ? stageForZone(category, zoneId) : undefined);
     if (effectiveStage !== STAGES.ZONE_FINAL) return false;
-    return !zoneId || zoneId === f.secondStageZoneId;
+    if (!zoneId) return secondStageZones(category).length > 0;
+    return isSecondStageZone(category, zoneId);
   }
 
   function teamGeneralMatches(ctx, teamId, sourceZoneId) {
     return liveMatches(ctx.matches).filter(function (match) {
       if (match.stage !== STAGES.GENERAL) return false;
       if (match.winnerId !== teamId && match.loserId !== teamId) return false;
+      if (match.matchType === MATCH_TYPES.INTERZONAL) return true;
       return !sourceZoneId || !match.zoneId || match.zoneId === sourceZoneId;
     });
   }
@@ -196,7 +422,7 @@
   /** Recalcula y sincroniza `carriedStats` en `category.zoneTournament.qualified`. MUTA `category`. */
   function syncCarriedStats(ctx) {
     const f = flow(ctx && ctx.category);
-    if (!ctx || !ctx.category || isSingleZoneFormat(ctx.category) || !f.secondStageZoneId || !Array.isArray(f.qualified)) return;
+    if (!ctx || !ctx.category || isSingleZoneFormat(ctx.category) || !Array.isArray(f.qualified) || !f.qualified.length) return;
     f.qualified.forEach(function (q) {
       const team = ctx.teams.filter(function (t) { return t.id === q.teamId; })[0];
       if (!team) {
@@ -221,23 +447,40 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Modalidad A: clasificación de zonas iniciales
+  // Clasificación de Primera Etapa (+40, +50, +60)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Estado de clasificación de una zona inicial.
-   * status: INSUFFICIENT_TEAMS | INCOMPLETE | TIED | DEFINED
-   * Un empate sólo bloquea si cruza el corte de clasificación (p. ej. 2.º vs 3.º).
-   */
+  function blockingTiesForZone(category, zone, ranking) {
+    const unresolved = ranking.ties.filter(function (tie) { return !tie.resolved; });
+    if (!unresolved.length) return [];
+    if (isTorneo50(category)) {
+      if (zone.code === 'A' || zone.code === 'B') {
+        // 1° -> Z1, 2° -> Z2, 3° y 4° -> Z3 (el empate 3°-4° no cambia destino)
+        return unresolved.filter(function (tie) {
+          return (tie.start < 1 && tie.end >= 1) || (tie.start < 2 && tie.end >= 2);
+        });
+      }
+      // En Zonas C y D: 1° -> Z2, 2° -> Z1, 3° -> Z3 (cualquier puesto define destino)
+      return unresolved;
+    }
+    if (isTorneo60(category)) {
+      // En +60 cada puesto 1°..6° pasa a un triangular distinto (Zonas 1..6)
+      return unresolved;
+    }
+    const cut = QUALIFIERS_PER_ZONE;
+    return unresolved.filter(function (tie) { return tie.start < cut && tie.end >= cut; });
+  }
+
   function zoneQualification(ctx, zone) {
     const progress = zoneProgress(ctx, zone, STAGES.GENERAL);
     const ranking = zoneRanking(ctx, zone, STAGES.GENERAL);
-    const cut = QUALIFIERS_PER_ZONE;
-    const blockingTies = ranking.ties.filter(function (tie) { return !tie.resolved && tie.start < cut && tie.end >= cut; });
+    const blockingTies = blockingTiesForZone(ctx.category, zone, ranking);
+    const targetTeams = zoneTargetTeams(ctx.category, zone);
     let status = 'DEFINED';
-    if (progress.teamCount < 2) status = 'INSUFFICIENT_TEAMS';
+    if (targetTeams ? progress.teamCount !== targetTeams : progress.teamCount < 2) status = 'INSUFFICIENT_TEAMS';
     else if (!progress.complete) status = 'INCOMPLETE';
     else if (blockingTies.length) status = 'TIED';
+    const cut = isTorneo50(ctx.category) || isTorneo60(ctx.category) ? ranking.rows.length : QUALIFIERS_PER_ZONE;
     const qualifierIds = ranking.rows.slice(0, cut).map(function (row) { return row.team.id; });
     return { zone, progress, ranking, blockingTies, status, qualifierIds, definitive: status === 'DEFINED' };
   }
@@ -256,54 +499,143 @@
     return issues;
   }
 
-  function zoneIssue(zq) {
-    if (zq.status === 'INSUFFICIENT_TEAMS') return zq.zone.name + ': necesita al menos dos equipos.';
-    if (zq.status === 'INCOMPLETE') return zq.zone.name + ': faltan ' + zq.progress.missing + ' resultado(s) para completar el todos contra todos.';
-    if (zq.status === 'TIED') return zq.zone.name + ': hay un empate sin resolver que afecta la clasificación.';
+  function zoneIssue(ctx, zq) {
+    const target = zoneTargetTeams(ctx.category, zq.zone);
+    if (zq.status === 'INSUFFICIENT_TEAMS') {
+      if (target) return zq.zone.name + ': debe tener exactamente ' + target + ' equipos (actualmente tiene ' + zq.progress.teamCount + ').';
+      return zq.zone.name + ': necesita al menos dos equipos.';
+    }
+    if (zq.status === 'INCOMPLETE') {
+      if (zq.progress.interzonalRequired && zq.progress.internalPlayed < zq.progress.internalRequired) {
+        return zq.zone.name + ': faltan ' + (zq.progress.internalRequired - zq.progress.internalPlayed) + ' partido(s) internos.';
+      }
+      if (zq.progress.interzonalRequired && zq.progress.interzonalPlayed < zq.progress.interzonalRequired) {
+        return zq.zone.name + ': faltan ' + (zq.progress.interzonalRequired - zq.progress.interzonalPlayed) + ' partido(s) del Interzonal C-D.';
+      }
+      return zq.zone.name + ': faltan ' + zq.progress.missing + ' resultado(s) para completar el todos contra todos.';
+    }
+    if (zq.status === 'TIED') return zq.zone.name + ': hay un empate sin resolver que afecta el pase a la siguiente fase.';
     return null;
+  }
+
+  function buildSecondStageAllocations50(zonesByCode, qualifiedEntries) {
+    const find = function (code, pos) {
+      return qualifiedEntries.filter(function (q) { return q.sourceCode === code && q.position === pos; })[0];
+    };
+    const z1Teams = [find('A', 1), find('B', 1), find('C', 2), find('D', 2)].filter(Boolean);
+    const z2Teams = [find('C', 1), find('D', 1), find('A', 2), find('B', 2)].filter(Boolean);
+    const z3Teams = [find('A', 3), find('A', 4), find('B', 3), find('B', 4), find('C', 3), find('D', 3)].filter(Boolean);
+    return [
+      { code: '1', name: 'Zona 1 · Ronda Campeonato', phase: ZONE_PHASES.CHAMPIONSHIP, targetTeams: 4, teamIds: z1Teams.map(function (q) { return q.teamId; }) },
+      { code: '2', name: 'Zona 2 · Ronda Campeonato', phase: ZONE_PHASES.CHAMPIONSHIP, targetTeams: 4, teamIds: z2Teams.map(function (q) { return q.teamId; }) },
+      { code: '3', name: 'Zona 3 · Ronda Estímulo (9° al 14°)', phase: ZONE_PHASES.STIMULUS, targetTeams: 6, teamIds: z3Teams.map(function (q) { return q.teamId; }) }
+    ];
+  }
+
+  function buildSecondStageAllocations60(zonesByCode, qualifiedEntries) {
+    const find = function (code, pos) {
+      return qualifiedEntries.filter(function (q) { return q.sourceCode === code && q.position === pos; })[0];
+    };
+    return [
+      { code: '1', name: 'Zona 1 · Campeonato', phase: ZONE_PHASES.CHAMPIONSHIP, targetTeams: 3, teamIds: [find('A', 1), find('B', 2), find('C', 1)].filter(Boolean).map(function (q) { return q.teamId; }) },
+      { code: '2', name: 'Zona 2 · Campeonato', phase: ZONE_PHASES.CHAMPIONSHIP, targetTeams: 3, teamIds: [find('A', 2), find('B', 1), find('C', 2)].filter(Boolean).map(function (q) { return q.teamId; }) },
+      { code: '3', name: 'Zona 3 · Puestos 7° al 9°', phase: ZONE_PHASES.PLACEMENT, targetTeams: 3, teamIds: [find('A', 3), find('B', 3), find('C', 3)].filter(Boolean).map(function (q) { return q.teamId; }) },
+      { code: '4', name: 'Zona 4 · Puestos 10° al 12°', phase: ZONE_PHASES.PLACEMENT, targetTeams: 3, teamIds: [find('A', 4), find('B', 4), find('C', 4)].filter(Boolean).map(function (q) { return q.teamId; }) },
+      { code: '5', name: 'Zona 5 · Puestos 13° al 15°', phase: ZONE_PHASES.PLACEMENT, targetTeams: 3, teamIds: [find('A', 5), find('B', 5), find('C', 5)].filter(Boolean).map(function (q) { return q.teamId; }) },
+      { code: '6', name: 'Zona 6 · Puestos 16° al 18°', phase: ZONE_PHASES.PLACEMENT, targetTeams: 3, teamIds: [find('A', 6), find('B', 6), find('C', 6)].filter(Boolean).map(function (q) { return q.teamId; }) }
+    ];
   }
 
   /**
    * Clasificación completa de la primera etapa.
-   * @returns {{zones: Array, issues: string[], ready: boolean, qualifiers: Array<{teamId, sourceZoneId, position, carriedStats}>}}
    */
   function computeQualification(ctx) {
-    const zones = initialZones(ctx.category).map(function (zone) { return zoneQualification(ctx, zone); });
+    const category = ctx.category;
+    const zones = initialZones(category).map(function (zone) { return zoneQualification(ctx, zone); });
     const issues = [];
     if (!zones.length) issues.push('Creá al menos una zona.');
     assignmentIssues(ctx).forEach(function (issue) { issues.push(issue); });
-    zones.forEach(function (zq) { const issue = zoneIssue(zq); if (issue) issues.push(issue); });
+
+    if (isTorneo50(category)) {
+      const iz = interzonalStatus(ctx);
+      if (!iz.allAssigned) issues.push('Completá los 3 enfrentamientos en el selector Interzonal C-D.');
+      else if (!iz.allPlayed) issues.push('Faltan cargar ' + (3 - iz.playedCount) + ' resultado(s) del Interzonal C-D.');
+    }
+
+    zones.forEach(function (zq) {
+      const issue = zoneIssue(ctx, zq);
+      if (issue && issues.indexOf(issue) < 0) issues.push(issue);
+    });
+
     const qualifiers = [];
     zones.forEach(function (zq) {
+      const code = zq.zone.code || zq.zone.name.slice(-1).toUpperCase();
       zq.qualifierIds.forEach(function (teamId, index) {
         const row = zq.ranking.rows[index];
         qualifiers.push({
           teamId,
           sourceZoneId: zq.zone.id,
+          sourceCode: code,
           position: index + 1,
           carriedStats: standings.toCarriedStats(row)
         });
       });
     });
+
     const unique = {};
     qualifiers.forEach(function (q) { unique[q.teamId] = true; });
     if (Object.keys(unique).length !== qualifiers.length) issues.push('Hay equipos clasificados duplicados.');
-    return { zones, issues, ready: issues.length === 0, qualifiers };
+
+    let secondStageAllocations = [];
+    if (isTorneo50(category)) {
+      secondStageAllocations = buildSecondStageAllocations50(zones, qualifiers);
+    } else if (isTorneo60(category)) {
+      secondStageAllocations = buildSecondStageAllocations60(zones, qualifiers);
+    } else {
+      secondStageAllocations = [{
+        code: 'F',
+        name: constants.SECOND_STAGE_ZONE_NAME,
+        phase: ZONE_PHASES.FINAL,
+        teamIds: qualifiers.map(function (q) { return q.teamId; })
+      }];
+    }
+
+    return { zones, issues, ready: issues.length === 0, qualifiers, secondStageAllocations };
   }
 
   /**
    * Compara los clasificados confirmados con los que surgen de los resultados
-   * actuales de la primera etapa (p. ej. tras corregir un resultado).
+   * actuales de la primera etapa.
    */
   function qualificationDrift(ctx) {
     const f = flow(ctx.category);
-    if (isSingleZoneFormat(ctx.category) || !f.secondStageZoneId || ctx.category.currentStage !== STAGES.ZONE_FINAL) {
+    if (isSingleZoneFormat(ctx.category) || ctx.category.currentStage === STAGES.GENERAL || !f.qualified.length) {
       return { applicable: false, determinable: true, changed: false, outgoing: [], incoming: [], issues: [], qualifiers: [] };
     }
     const confirmed = f.qualified.map(function (q) { return q.teamId; });
     const computed = computeQualification(ctx);
     if (!computed.ready) {
       return { applicable: true, determinable: false, changed: false, outgoing: [], incoming: [], issues: computed.issues, qualifiers: [] };
+    }
+    if (isTorneo50(ctx.category) || isTorneo60(ctx.category)) {
+      const confirmedByKey = {};
+      f.qualified.forEach(function (q) { confirmedByKey[q.sourceZoneId + ':' + q.position] = q.teamId; });
+      const changedPositions = computed.qualifiers.some(function (q) {
+        return confirmedByKey[q.sourceZoneId + ':' + q.position] !== q.teamId;
+      });
+      const computedIds = computed.qualifiers.map(function (q) { return q.teamId; });
+      const outgoing = confirmed.filter(function (id) { return computedIds.indexOf(id) < 0; });
+      const incoming = computedIds.filter(function (id) { return confirmed.indexOf(id) < 0; });
+      return {
+        applicable: true,
+        determinable: true,
+        changed: changedPositions || outgoing.length + incoming.length > 0,
+        outgoing,
+        incoming,
+        issues: [],
+        qualifiers: computed.qualifiers,
+        secondStageAllocations: computed.secondStageAllocations
+      };
     }
     const computedIds = computed.qualifiers.map(function (q) { return q.teamId; });
     const outgoing = confirmed.filter(function (id) { return computedIds.indexOf(id) < 0; });
@@ -312,17 +644,310 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Zona única y clasificación final (ambas modalidades)
+  // Cruces Finales (Día 3) para +50, +60 y +68
   // ---------------------------------------------------------------------------
 
+  function playoffMatches(ctx) {
+    return liveMatches(ctx && ctx.matches).filter(function (m) {
+      return m.stage === STAGES.PLAYOFFS || m.matchType === MATCH_TYPES.PLAYOFF;
+    });
+  }
+
+  function findPlayoffMatch(ctx, bracketId) {
+    return playoffMatches(ctx).filter(function (m) { return m.bracketId === bracketId; })[0] || null;
+  }
+
+  function makePlayoffSlot(ctx, def) {
+    const match = findPlayoffMatch(ctx, def.id);
+    const ready = Boolean(def.teamA && def.teamB && def.teamA.id !== def.teamB.id);
+    const teamMap = {};
+    (ctx.teams || []).forEach(function (t) { teamMap[t.id] = t; });
+    return {
+      id: def.id,
+      label: def.label,
+      group: def.group,
+      teamASource: def.teamASource,
+      teamBSource: def.teamBSource,
+      teamA: def.teamA || null,
+      teamB: def.teamB || null,
+      ready,
+      match,
+      winner: match ? (teamMap[match.winnerId] || null) : null,
+      loser: match ? (teamMap[match.loserId] || null) : null
+    };
+  }
+
+  function evaluateSecondStageZone(ctx, zone) {
+    if (!zone) return { zone: null, progress: null, ranking: { rows: [], ties: [] }, unresolvedTies: [], complete: false, ready: false };
+    const progress = zoneProgress(ctx, zone, STAGES.ZONE_FINAL);
+    const ranking = zoneRanking(ctx, zone, STAGES.ZONE_FINAL);
+    const unresolvedTies = ranking.ties.filter(function (tie) { return !tie.resolved; });
+    return {
+      zone,
+      progress,
+      ranking,
+      unresolvedTies,
+      complete: progress.complete,
+      ready: progress.complete && unresolvedTies.length === 0
+    };
+  }
+
   /**
-   * Clasificación de la zona única. Es DEFINITIVA sólo si:
-   *  - todos los enfrentamientos del todos contra todos tienen resultado,
-   *  - no hay empates sin resolver,
-   *  - (Modalidad A) los clasificados confirmados siguen coincidiendo con la primera etapa.
+   * Deriva el cuadro de Cruces Finales (Día 3) y posiciones finales del torneo.
    */
+  function computePlayoffs(ctx) {
+    const category = ctx && ctx.category;
+    if (!category || !hasPlayoffStageFormat(category)) {
+      return { applicable: false, unlocked: false, reasons: [], slots: [], placementZones: [], allComplete: false };
+    }
+
+    if (isTorneo68(category)) {
+      const zU = finalZone(category);
+      const evalU = evaluateSecondStageZone(ctx, zU);
+      const reasons = [];
+      if (!evalU.zone || evalU.progress.teamCount !== 8) reasons.push('La Zona única requiere exactamente 8 equipos.');
+      else if (!evalU.progress.complete) reasons.push('Faltan ' + evalU.progress.missing + ' de ' + evalU.progress.required + ' partido(s) en la Zona única.');
+      if (evalU.unresolvedTies.length) reasons.push('Hay ' + evalU.unresolvedTies.length + ' empate(s) sin resolver en la Zona única.');
+      const unlocked = reasons.length === 0;
+      const rows = unlocked ? evalU.ranking.rows : [];
+      const t = function (idx) { return rows[idx] ? rows[idx].team : null; };
+
+      const semi1 = makePlayoffSlot(ctx, {
+        id: 'semi-1',
+        label: 'Semifinal 1',
+        group: 'Semifinales',
+        teamASource: '1° Tabla General',
+        teamBSource: '4° Tabla General',
+        teamA: t(0),
+        teamB: t(3)
+      });
+      const semi2 = makePlayoffSlot(ctx, {
+        id: 'semi-2',
+        label: 'Semifinal 2',
+        group: 'Semifinales',
+        teamASource: '2° Tabla General',
+        teamBSource: '3° Tabla General',
+        teamA: t(1),
+        teamB: t(2)
+      });
+      const finalSlot = makePlayoffSlot(ctx, {
+        id: 'final',
+        label: 'Gran Final (1° y 2° Puesto)',
+        group: 'Finales',
+        teamASource: 'Ganador Semifinal 1',
+        teamBSource: 'Ganador Semifinal 2',
+        teamA: semi1.winner,
+        teamB: semi2.winner
+      });
+      const thirdSlot = makePlayoffSlot(ctx, {
+        id: 'third-place',
+        label: '3° y 4° Puesto',
+        group: 'Finales',
+        teamASource: 'Perdedor Semifinal 1',
+        teamBSource: 'Perdedor Semifinal 2',
+        teamA: semi1.loser,
+        teamB: semi2.loser
+      });
+      const slots = [semi1, semi2, finalSlot, thirdSlot];
+      return {
+        applicable: true,
+        unlocked,
+        reasons,
+        slots,
+        placementZones: [{ label: 'Puestos 5° al 8° (Directo por Tabla General)', offset: 5, eval: evalU, sliceStart: 4, sliceEnd: 8 }],
+        allComplete: unlocked && slots.every(function (s) { return Boolean(s.match); })
+      };
+    }
+
+    // +50 y +60: requiere haber cerrado Fase 1
+    if (category.currentStage === STAGES.GENERAL) {
+      return {
+        applicable: true,
+        unlocked: false,
+        reasons: ['Primero cerrá la Fase de Grupos para generar las zonas de Segunda Fase.'],
+        slots: [],
+        placementZones: [],
+        allComplete: false
+      };
+    }
+
+    const z1 = zoneByCode(category, '1');
+    const z2 = zoneByCode(category, '2');
+    const e1 = evaluateSecondStageZone(ctx, z1);
+    const e2 = evaluateSecondStageZone(ctx, z2);
+    const reasons = [];
+    if (!e1.complete) reasons.push('Zona 1: faltan ' + (e1.progress ? e1.progress.missing : 0) + ' partido(s).');
+    else if (e1.unresolvedTies.length) reasons.push('Zona 1: hay empate(s) sin resolver.');
+    if (!e2.complete) reasons.push('Zona 2: faltan ' + (e2.progress ? e2.progress.missing : 0) + ' partido(s).');
+    else if (e2.unresolvedTies.length) reasons.push('Zona 2: hay empate(s) sin resolver.');
+
+    const unlocked = Boolean(e1.ready && e2.ready);
+    const r1 = unlocked ? e1.ranking.rows : [];
+    const r2 = unlocked ? e2.ranking.rows : [];
+    const t1 = function (idx) { return r1[idx] ? r1[idx].team : null; };
+    const t2 = function (idx) { return r2[idx] ? r2[idx].team : null; };
+
+    const semi1 = makePlayoffSlot(ctx, {
+      id: 'semi-1',
+      label: 'Semifinal 1',
+      group: 'Semifinales',
+      teamASource: '1° Zona 1',
+      teamBSource: '2° Zona 2',
+      teamA: t1(0),
+      teamB: t2(1)
+    });
+    const semi2 = makePlayoffSlot(ctx, {
+      id: 'semi-2',
+      label: 'Semifinal 2',
+      group: 'Semifinales',
+      teamASource: '1° Zona 2',
+      teamBSource: '2° Zona 1',
+      teamA: t2(0),
+      teamB: t1(1)
+    });
+    const finalSlot = makePlayoffSlot(ctx, {
+      id: 'final',
+      label: 'Final (1° y 2° Puesto)',
+      group: 'Finales',
+      teamASource: 'Ganador Semifinal 1',
+      teamBSource: 'Ganador Semifinal 2',
+      teamA: semi1.winner,
+      teamB: semi2.winner
+    });
+    const thirdSlot = makePlayoffSlot(ctx, {
+      id: 'third-place',
+      label: '3° y 4° Puesto',
+      group: 'Finales',
+      teamASource: 'Perdedor Semifinal 1',
+      teamBSource: 'Perdedor Semifinal 2',
+      teamA: semi1.loser,
+      teamB: semi2.loser
+    });
+    const fifthSlot = makePlayoffSlot(ctx, {
+      id: 'fifth-place',
+      label: '5° y 6° Puesto',
+      group: 'Reclasificación',
+      teamASource: '3° Zona 1',
+      teamBSource: '3° Zona 2',
+      teamA: t1(2),
+      teamB: t2(2)
+    });
+
+    const slots = [semi1, semi2, finalSlot, thirdSlot, fifthSlot];
+    const placementZones = [];
+
+    if (isTorneo50(category)) {
+      slots.push(makePlayoffSlot(ctx, {
+        id: 'seventh-place',
+        label: '7° y 8° Puesto',
+        group: 'Reclasificación',
+        teamASource: '4° Zona 1',
+        teamBSource: '4° Zona 2',
+        teamA: t1(3),
+        teamB: t2(3)
+      }));
+      const z3 = zoneByCode(category, '3');
+      const e3 = evaluateSecondStageZone(ctx, z3);
+      placementZones.push({ label: 'Puestos 9° al 14° (Zona 3 · Ronda Estímulo)', offset: 9, eval: e3, sliceStart: 0, sliceEnd: 6 });
+    } else if (isTorneo60(category)) {
+      [
+        { code: '3', offset: 7, label: 'Puestos 7° al 9° (Zona 3)' },
+        { code: '4', offset: 10, label: 'Puestos 10° al 12° (Zona 4)' },
+        { code: '5', offset: 13, label: 'Puestos 13° al 15° (Zona 5)' },
+        { code: '6', offset: 16, label: 'Puestos 16° al 18° (Zona 6)' }
+      ].forEach(function (spec) {
+        const z = zoneByCode(category, spec.code);
+        placementZones.push({ label: spec.label, offset: spec.offset, eval: evaluateSecondStageZone(ctx, z), sliceStart: 0, sliceEnd: 3 });
+      });
+    }
+
+    const bracketsDone = unlocked && slots.every(function (s) { return Boolean(s.match); });
+    const placementDone = placementZones.every(function (p) { return p.eval.ready; });
+
+    return {
+      applicable: true,
+      unlocked,
+      reasons,
+      slots,
+      placementZones,
+      allComplete: bracketsDone && placementDone
+    };
+  }
+
+  /**
+   * Tabla general de posiciones finales del torneo (1°..14° / 1°..18° / 1°..8°).
+   */
+  function computeFinalStandings(ctx) {
+    const category = ctx && ctx.category;
+    const playoffs = computePlayoffs(ctx);
+    if (!playoffs.applicable) return [];
+    const byId = {};
+    playoffs.slots.forEach(function (s) { byId[s.id] = s; });
+
+    const rows = [];
+    const pushBracket = function (posW, posL, slotId, origin) {
+      const s = byId[slotId];
+      rows.push({ position: posW, team: s && s.winner ? s.winner : null, origin: origin + ' · Ganador', detail: s && s.match ? s.match.score.replace('-', '–') : 'Pendiente' });
+      rows.push({ position: posL, team: s && s.loser ? s.loser : null, origin: origin + ' · Perdedor', detail: s && s.match ? s.match.score.replace('-', '–') : 'Pendiente' });
+    };
+
+    pushBracket(1, 2, 'final', 'Final');
+    pushBracket(3, 4, 'third-place', '3° y 4° Puesto');
+    if (isTorneo50(category) || isTorneo60(category)) {
+      pushBracket(5, 6, 'fifth-place', '5° y 6° Puesto');
+    }
+    if (isTorneo50(category)) {
+      pushBracket(7, 8, 'seventh-place', '7° y 8° Puesto');
+    }
+
+    playoffs.placementZones.forEach(function (pz) {
+      const count = pz.sliceEnd - pz.sliceStart;
+      const sourceRows = pz.eval && pz.eval.ready ? pz.eval.ranking.rows.slice(pz.sliceStart, pz.sliceEnd) : [];
+      for (let i = 0; i < count; i += 1) {
+        const r = sourceRows[i] || null;
+        rows.push({
+          position: pz.offset + i,
+          team: r ? r.team : null,
+          origin: pz.label,
+          detail: r ? (r.classificationPoints + ' pts · DIF ' + (r.difference > 0 ? '+' + r.difference : r.difference)) : 'En juego / Pendiente'
+        });
+      }
+    });
+
+    return rows;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Zona única y clasificación final (retrocompatible con +40 y genéricos)
+  // ---------------------------------------------------------------------------
+
   function finalClassification(ctx) {
-    const zone = finalZone(ctx.category);
+    const category = ctx.category;
+    if (hasPlayoffStageFormat(category)) {
+      const playoffs = computePlayoffs(ctx);
+      const finalTable = computeFinalStandings(ctx);
+      const reasons = playoffs.reasons.slice();
+      playoffs.slots.forEach(function (s) {
+        if (!s.match) reasons.push('Falta jugar: ' + s.label + '.');
+      });
+      playoffs.placementZones.forEach(function (pz) {
+        if (!pz.eval.complete) reasons.push(pz.label + ': faltan partidos.');
+        else if (pz.eval.unresolvedTies.length) reasons.push(pz.label + ': hay empate(s) sin resolver.');
+      });
+      return {
+        zone: finalZone(category),
+        progress: null,
+        ranking: { rows: [], ties: [] },
+        unresolvedTies: [],
+        reasons,
+        definitive: playoffs.allComplete,
+        drift: qualificationDrift(ctx),
+        playoffs,
+        finalTable
+      };
+    }
+
+    const zone = finalZone(category);
     if (!zone) {
       return { zone: null, progress: null, ranking: { rows: [], ties: [] }, unresolvedTies: [], reasons: ['La zona única todavía no fue creada.'], definitive: false, drift: null };
     }
@@ -344,7 +969,18 @@
     const category = ctx.category;
     let code;
     if (category.currentStage === STAGES.FINISHED) code = PHASES.FINISHED;
-    else if (category.currentStage === STAGES.ZONE_FINAL) {
+    else if (hasPlayoffStageFormat(category)) {
+      if (category.currentStage === STAGES.GENERAL) {
+        const qualification = computeQualification(ctx);
+        const allComplete = qualification.zones.every(function (zq) { return zq.progress.complete; }) &&
+          (!isTorneo50(category) || interzonalStatus(ctx).allPlayed);
+        if (qualification.ready) code = PHASES.QUALIFIED;
+        else if (allComplete) code = PHASES.QUALIFICATION_PENDING;
+        else code = PHASES.FIRST_STAGE_IN_PROGRESS;
+      } else {
+        code = computePlayoffs(ctx).allComplete ? PHASES.FINAL_AVAILABLE : PHASES.SINGLE_ZONE_IN_PROGRESS;
+      }
+    } else if (category.currentStage === STAGES.ZONE_FINAL) {
       code = finalClassification(ctx).definitive ? PHASES.FINAL_AVAILABLE : PHASES.SINGLE_ZONE_IN_PROGRESS;
     } else if (!initialZones(category).length) code = PHASES.CONFIGURING;
     else {
@@ -361,18 +997,8 @@
   // Mutaciones del agregado (documentadas)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Convierte una categoría con zonas (en primera etapa) a modalidad de zona única.
-   * Conserva TODOS los datos: todos los equipos pasan a la zona única y los
-   * resultados de la primera etapa se reetiquetan como resultados de la zona única
-   * (guardando `originalZoneId` para trazabilidad). No se borra ningún resultado.
-   *
-   * MUTA `category`, `teams` y `matches` recibidos.
-   * @param {{newId: function(string): string, name?: string}} deps
-   */
   function convertCategoryToSingleZone(category, teams, matches, deps) {
     const zones = initialZones(category);
-    // Con una sola zona existente se reutiliza (conserva id, nombre y resultados).
     const target = zones.length === 1
       ? zones[0]
       : { id: deps.newId('zone'), name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] };
@@ -398,19 +1024,36 @@
   }
 
   return Object.freeze({
+    TORNEO_50_SPEC,
+    TORNEO_60_SPEC,
+    defaultInterzonals,
     emptyZoneTournament,
     singleZoneTournament,
     flow,
+    isTorneo50,
+    isTorneo60,
+    isTorneo68,
     isSingleZoneFormat,
+    hasPlayoffStageFormat,
     inferFormat,
     zoneById,
+    zoneByCode,
     initialZones,
+    secondStageZones,
     finalZone,
     isInitialZone,
+    isSecondStageZone,
     teamInitialZone,
     stageForZone,
     scopeKey,
+    zoneTargetTeams,
     liveMatches,
+    interzonalSlots,
+    interzonalZones,
+    isInterzonalZone,
+    interzonalMatches,
+    interzonalMatchForSlot,
+    interzonalStatus,
     scopeMatches,
     zoneTeams,
     pairKey,
@@ -423,6 +1066,10 @@
     assignmentIssues,
     computeQualification,
     qualificationDrift,
+    playoffMatches,
+    findPlayoffMatch,
+    computePlayoffs,
+    computeFinalStandings,
     finalClassification,
     phase,
     convertCategoryToSingleZone

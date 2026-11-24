@@ -18,21 +18,26 @@
 
   /** Etapas persistidas en `category.currentStage`, `team.stage` y `match.stage`. */
   const STAGES = Object.freeze({
-    GENERAL: 'GENERAL', // Fase clasificatoria (zonas iniciales).
-    ZONE_FINAL: 'ZONE_FINAL', // Zona final (+50/+40) o zona única (+60/+68).
+    GENERAL: 'GENERAL', // Fase clasificatoria / Fase de grupos (Día 1 / Días 1-2).
+    ZONE_FINAL: 'ZONE_FINAL', // Segunda fase (Zona final / Zonas 1-3 / Zonas 1-6 / Zona única).
+    PLAYOFFS: 'PLAYOFFS', // Cruces finales (Semifinales, Final y puestos).
     FINISHED: 'FINISHED'
   });
 
   const STAGE_LABELS = Object.freeze({
-    GENERAL: 'Fase clasificatoria',
-    ZONE_FINAL: 'Zona final',
+    GENERAL: 'Fase de grupos',
+    ZONE_FINAL: 'Segunda fase',
+    PLAYOFFS: 'Cruces finales',
     FINISHED: 'Finalizado'
   });
 
-  /** Fase de cada zona (`clasificatoria` o `final`). */
+  /** Fase de cada zona. */
   const ZONE_PHASES = Object.freeze({
     QUALIFYING: 'clasificatoria',
-    FINAL: 'final'
+    FINAL: 'final',
+    CHAMPIONSHIP: 'campeonato',
+    STIMULUS: 'estimulo',
+    PLACEMENT: 'posicion'
   });
 
   const STATUS = Object.freeze({
@@ -67,20 +72,46 @@
 
   /**
    * Modalidades de competición.
-   * - ZONES_AND_FINAL / ZONES: Zonas clasificatorias → 2 clasificados por zona → Zona final (+50 y +40).
-   * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (+60/+68).
+   * - ZONES_AND_FINAL / ZONES: Zonas clasificatorias → 2 clasificados por zona → Zona final (+40 / genérico).
+   * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (genérico).
+   * - TORNEO_50: +50 (14 eq.): 4 zonas (A=4, B=4, C=3+Interz, D=3+Interz) → Z1, Z2, Z3 → Cruces Día 3.
+   * - TORNEO_60: +60 (18 eq.): 3 zonas (A=6, B=6, C=6) → Z1..Z6 (triangulares) → Cruces Día 3.
+   * - TORNEO_68: +68 (8 eq.): Zona Única (8) → Semifinales (1v4, 2v3), Final, 3°/4° y 5°-8° directo.
    */
   const FORMATS = Object.freeze({
     ZONES_AND_FINAL: 'zonas_y_final',
     ROUND_ROBIN: 'todos_contra_todos',
+    TORNEO_50: 'torneo_50',
+    TORNEO_60: 'torneo_60',
+    TORNEO_68: 'torneo_68',
     ZONES: 'zonas_y_final',
     SINGLE_ZONE: 'todos_contra_todos'
   });
 
   const FORMAT_LABELS = Object.freeze({
-    zonas_y_final: 'Zonas clasificatorias + Zona final',
-    todos_contra_todos: 'Todos contra todos (zona única)'
+    zonas_y_final: 'Zonas clasificatorias + Zona final (+40 / Genérico)',
+    todos_contra_todos: 'Todos contra todos (zona única)',
+    torneo_50: 'Categoría +50 · 14 equipos (4 zonas + Interzonal C-D + Cruces)',
+    torneo_60: 'Categoría +60 · 18 equipos (3 zonas de 6 + Triangulares + Cruces)',
+    torneo_68: 'Categoría +68 · 8 equipos (Zona única + Semifinales y Final)'
   });
+
+  const MATCH_TYPES = Object.freeze({
+    ZONE: 'ZONE',
+    INTERZONAL: 'INTERZONAL',
+    PLAYOFF: 'PLAYOFF'
+  });
+
+  const DEFAULT_TEAMS_68 = Object.freeze([
+    'Los Nahuel',
+    'Águilas Doradas',
+    'Toninas',
+    'Unidos por el Newcom',
+    'Newen',
+    'Abrojal',
+    'Dubke Ñucom',
+    'Corsarios'
+  ]);
 
   /** Estados de alto nivel que se muestran al usuario (derivados, nunca persistidos). */
   const PHASES = Object.freeze({
@@ -137,6 +168,8 @@
     SECOND_STAGE_ZONE_NAME,
     SINGLE_ZONE_CATEGORY_PATTERN,
     ARCHIVE_REASONS,
+    MATCH_TYPES,
+    DEFAULT_TEAMS_68,
     SCHEMA_VERSION,
     STORAGE_KEY
   });

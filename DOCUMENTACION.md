@@ -16,7 +16,7 @@
 3. **Carga Manual Guiada (Sin Fixtures Automáticos):** El sistema no asume calendarios fijos ni genera emparejamientos automáticos que restrinjan la mesa de control; los partidos se registran a medida que se juegan en cancha, validando los tanteadores reales set a set.
 4. **Reglamento Oficial de Puntuación (3, 2 y 1):**
    * **Victoria 2–0:** 3 puntos al ganador, 1 punto al perdedor.
-   * **Victoria 2–1:** 2 puntos al ganador, 1 punto al perdedor.
+   * **Victoria 2–1:** 3 puntos al ganador, 2 punto al perdedor.
    * *Presentación/Participación:* El equipo perdedor siempre acumula 1 punto por partido jugado.
 5. **Criterios Estrictos de Desempate en Cascada:**
    La tabla ordena prioritariamente por Puntos de Clasificación acumulados. Únicamente ante empate en puntos se aplican:

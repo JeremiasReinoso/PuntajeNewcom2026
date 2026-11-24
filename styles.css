@@ -311,6 +311,51 @@ main { max-width: 1260px; margin: auto; padding: 30px 36px 48px; }
 .official-matches-table .match-res-cell.is-winner { background: var(--green-soft); color: var(--green); }
 .official-matches-table .match-row-loser td { border-bottom: 2px solid var(--line); }
 
+/* Interzonal C-D (+50), Desempates y Cruces Finales */
+.zone-full-pill { margin-top: 12px; padding: 7px 11px; border-radius: 8px; background: var(--green-soft); color: var(--green); font-size: 11px; font-weight: 700; display: inline-block; }
+.interzonal-card { margin-top: 18px; }
+.interzonal-table { min-width: 640px; }
+.interzonal-table th, .interzonal-table td { padding: 10px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.interzonal-table thead th { background: var(--green); color: #fff; font-size: 11px; font-weight: 800; }
+.interzonal-table td:first-child, .interzonal-table th:first-child { width: 92px; text-align: center; }
+.interzonal-table select { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); padding: 8px 10px; font-weight: 600; }
+.iz-pill { display: inline-block; padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.iz-pill.pending { background: var(--grey-block); color: var(--muted); }
+.iz-pill.assigned { background: var(--accent-soft); color: var(--accent); }
+.iz-pill.loaded { background: var(--green-soft); color: var(--green); }
+.iz-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.iz-btn { padding: 7px 11px; font-size: 12px; }
+.interzonal-status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+.iz-summary-box { padding: 12px 14px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line); display: grid; gap: 4px; font-size: 12px; }
+.iz-summary-box strong { color: var(--green); }
+.iz-summary-box small { color: var(--muted); font-size: 11px; }
+.interzonal-list-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.interzonal-list-wrap h3 { margin: 0 0 8px; font-size: 14px; }
+
+.tie-alert-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 16px; background: var(--accent-soft); border-bottom: 1px solid var(--accent); font-size: 12px; }
+.tie-alert-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.playoff-stage-card { margin-top: 16px; margin-bottom: 20px; }
+.playoff-slots-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.playoff-match-box { border: 1px solid var(--line); border-radius: 11px; padding: 13px 15px; background: var(--soft); display: grid; gap: 10px; }
+.playoff-match-box.is-played { border-color: var(--green); background: var(--card); }
+.playoff-match-box.is-ready { border-color: var(--accent); background: var(--card); }
+.pm-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pm-teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; background: var(--card); border: 1px solid var(--line); }
+.playoff-match-box.is-played .pm-teams { background: var(--soft); }
+.pm-teams small { display: block; color: var(--muted); font-size: 10px; font-weight: 700; }
+.pm-teams b { display: block; font-size: 13px; margin-top: 2px; }
+.pm-vs { font-size: 10px; font-weight: 800; color: var(--muted); }
+.pm-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.final-standings-wrap { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.final-standings-wrap h3 { margin: 0 0 10px; font-size: 15px; }
+.final-rank-table thead th { background: var(--green); color: #fff; padding: 9px 10px; text-align: left; font-size: 11px; }
+.final-rank-table thead th:first-child { width: 64px; text-align: center; }
+.final-rank-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: center; }
+.final-rank-table .row-podium td { background: var(--green-soft); }
+.modal-check { display: flex !important; align-items: center; gap: 8px; color: var(--text) !important; font-weight: 600; }
+.modal-check input { width: auto !important; margin: 0 !important; }
+
 /* Avisos y Modal */
 .notice { padding: 11px 14px; border-radius: 9px; margin: 0 0 16px; font-size: 13px; font-weight: 600; }
 .notice.success { background: var(--green-soft); color: var(--green); }
@@ -354,7 +399,7 @@ main { max-width: 1260px; margin: auto; padding: 30px 36px 48px; }
   .mobile-brand .logo { width: 29px; height: 29px; font-size: 15px; }
   .crumb { display: none; }
   main { padding: 20px 15px 36px; }
-  .onboarding-steps, .workflow-stepper, .category-grid, .loader-selectors-grid, .playoff-grid { grid-template-columns: 1fr; }
+  .onboarding-steps, .workflow-stepper, .category-grid, .loader-selectors-grid, .playoff-grid, .interzonal-status-grid, .playoff-slots-grid { grid-template-columns: 1fr; }
   .heading, .toolbar, .zone-confirm, .guide-banner, .duplicate-match-banner { display: block; }
   .heading .primary, .toolbar .primary, .zone-confirm .primary, .guide-cta, .duplicate-match-banner button { width: 100%; margin-top: 12px; }
   .zone-create-inline { min-width: 0; margin-top: 12px; }

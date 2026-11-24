@@ -108,27 +108,33 @@
       const category = categoryById(categoryId);
       const zone = zoneId && category ? tournament.zoneById(category, zoneId) : null;
       const teams = teamsOf(categoryId).filter(function (team) { return !zoneId || (zone && zone.teamIds.indexOf(team.id) >= 0); });
-      const matches = tournament.liveMatches(matchesOf(categoryId)).filter(function (r) {
-        return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
-      });
+      const ctx = context(categoryId);
+      const matches = zoneId && ctx && stage
+        ? tournament.scopeMatches(ctx, stage, zoneId)
+        : tournament.liveMatches(matchesOf(categoryId)).filter(function (r) {
+          return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
+        });
       const options = { scoreStage: stage };
       if (category && tournament.isFinalAccumulatedScope(category, stage, zoneId)) {
-        options.baselineByTeamId = tournament.qualifiedBaselineMap(context(categoryId));
+        options.baselineByTeamId = tournament.qualifiedBaselineMap(ctx);
       }
       return standingsLib.computeStandings(teams, matches, options);
     }
 
-    /** Puntos de clasificación acumulados por un equipo según el sistema 3-2-1. */
+    /** Puntos de clasificación acumulados por un equipo según el sistema 3-3-2-1. */
     function classificationPoints(teamId, stage, zoneId) {
       const team = teamById(teamId);
       if (!team) return 0;
       const category = categoryById(team.categoryId);
-      const matches = tournament.liveMatches(matchesOf(team.categoryId)).filter(function (r) {
-        return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
-      });
+      const ctx = context(team.categoryId);
+      const matches = zoneId && ctx && stage
+        ? tournament.scopeMatches(ctx, stage, zoneId)
+        : tournament.liveMatches(matchesOf(team.categoryId)).filter(function (r) {
+          return (!stage || r.stage === stage) && (!zoneId || r.zoneId === zoneId);
+        });
       let total = standingsLib.classificationPointsFor(team.id, matches);
       if (category && tournament.isFinalAccumulatedScope(category, stage, zoneId)) {
-        const baseline = tournament.qualifiedBaselineMap(context(category.id))[team.id];
+        const baseline = tournament.qualifiedBaselineMap(ctx)[team.id];
         if (baseline) total += baseline.classificationPoints;
       }
       return total;
@@ -149,6 +155,9 @@
     function finalClassification(categoryId) { return tournament.finalClassification(context(categoryId)); }
     function qualificationDrift(categoryId) { return tournament.qualificationDrift(context(categoryId)); }
     function phase(categoryId) { return tournament.phase(context(categoryId)); }
+    function interzonalStatus(categoryId) { return tournament.interzonalStatus(context(categoryId)); }
+    function playoffs(categoryId) { return tournament.computePlayoffs(context(categoryId)); }
+    function finalStandings(categoryId) { return tournament.computeFinalStandings(context(categoryId)); }
 
     // -------------------------------------------------------------------------
     // Preferencias y categorías
@@ -163,25 +172,68 @@
       return commit(function () { state.theme = theme === 'dark' ? 'dark' : 'light'; });
     }
 
+    function normalizeRequestedFormat(name, format) {
+      if (format === FORMATS.TORNEO_50 || format === FORMATS.TORNEO_60 || format === FORMATS.TORNEO_68) return format;
+      if (format === FORMATS.ZONES_AND_FINAL || format === 'ZONES') return FORMATS.ZONES_AND_FINAL;
+      if (format === FORMATS.ROUND_ROBIN || format === 'SINGLE_ZONE') return FORMATS.ROUND_ROBIN;
+      return tournament.inferFormat(name);
+    }
+
     /**
-     * Crea una categoría. Si no se indica modalidad se infiere del nombre
-     * ("+60"/"+68" → zona única; resto → zonas + zona única).
+     * Crea una categoría. Si no se indica modalidad se infiere del nombre.
+     * Soporta formatos del 5° Torneo (+50, +60, +68) y genéricos (+40 / zona única).
      */
-    function createCategory(name, format) {
+    function createCategory(name, format, opts) {
       const trimmed = String(name || '').trim();
       ensure(trimmed, 'La categoría necesita un nombre.', 'CATEGORY_NAME_REQUIRED');
-      const chosen = format === FORMATS.ZONES_AND_FINAL || format === FORMATS.ROUND_ROBIN || format === 'ZONES' || format === 'SINGLE_ZONE'
-        ? (format === 'SINGLE_ZONE' || format === FORMATS.ROUND_ROBIN ? FORMATS.ROUND_ROBIN : FORMATS.ZONES_AND_FINAL)
-        : tournament.inferFormat(trimmed);
+      const chosen = normalizeRequestedFormat(trimmed, format);
       return commit(function () {
         const category = { id: newId('cat'), name: trimmed, format: chosen, currentStage: STAGES.GENERAL, championId: null, runnerUpId: null, zoneTournament: tournament.emptyZoneTournament() };
-        if (chosen === FORMATS.ROUND_ROBIN) {
+        if (chosen === FORMATS.ROUND_ROBIN || chosen === FORMATS.TORNEO_68) {
+          const singleZone = { id: newId('zone'), code: 'U', name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] };
+          if (chosen === FORMATS.TORNEO_68) singleZone.targetTeams = 8;
           category.currentStage = STAGES.ZONE_FINAL;
-          category.zoneTournament = tournament.singleZoneTournament({ id: newId('zone'), name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] });
+          category.zoneTournament = tournament.singleZoneTournament(singleZone);
+          if (chosen === FORMATS.TORNEO_68 && opts && opts.preloadTeams68) {
+            constants.DEFAULT_TEAMS_68.forEach(function (teamName) {
+              const team = { id: newId('team'), name: teamName, categoryId: category.id, status: STATUS.ACTIVE, stage: STAGES.ZONE_FINAL, scoreEntries: [] };
+              state.teams.push(team);
+              singleZone.teamIds.push(team.id);
+            });
+          }
+        } else if (chosen === FORMATS.TORNEO_50) {
+          category.zoneTournament.zones = tournament.TORNEO_50_SPEC.map(function (spec) {
+            return { id: newId('zone'), code: spec.code, name: spec.name, phase: constants.ZONE_PHASES.QUALIFYING, targetTeams: spec.targetTeams, teamIds: [] };
+          });
+          category.zoneTournament.status = ZONE_STATUS.IN_PROGRESS;
+          category.zoneTournament.firstStageStatus = 'IN_PROGRESS';
+        } else if (chosen === FORMATS.TORNEO_60) {
+          category.zoneTournament.zones = tournament.TORNEO_60_SPEC.map(function (spec) {
+            return { id: newId('zone'), code: spec.code, name: spec.name, phase: constants.ZONE_PHASES.QUALIFYING, targetTeams: spec.targetTeams, teamIds: [] };
+          });
+          category.zoneTournament.status = ZONE_STATUS.IN_PROGRESS;
+          category.zoneTournament.firstStageStatus = 'IN_PROGRESS';
         }
         state.categories.push(category);
         state.selectedCategoryId = category.id;
         return category;
+      });
+    }
+
+    function preloadTeams68() {
+      const category = requireCategory();
+      ensure(tournament.isTorneo68(category), 'Esta opción aplica únicamente a Categoría +68.', 'INVALID_FORMAT');
+      const zone = tournament.finalZone(category);
+      ensure(zone && zone.teamIds.length === 0, 'Ya hay equipos cargados en la Zona única.', 'ZONE_NOT_EMPTY');
+      return commit(function () {
+        const c = categoryById(category.id);
+        const z = tournament.finalZone(c);
+        return constants.DEFAULT_TEAMS_68.map(function (teamName) {
+          const team = { id: newId('team'), name: teamName, categoryId: c.id, status: STATUS.ACTIVE, stage: STAGES.ZONE_FINAL, scoreEntries: [] };
+          state.teams.push(team);
+          z.teamIds.push(team.id);
+          return team;
+        });
       });
     }
 
@@ -231,13 +283,21 @@
       const single = tournament.isSingleZoneFormat(category);
       if (single) {
         ensure(category.currentStage === STAGES.ZONE_FINAL, 'La categoría ya finalizó.', 'STAGE_LOCKED');
+        const fZone = tournament.finalZone(category);
+        const cap = tournament.zoneTargetTeams(category, fZone);
+        if (cap) ensure(fZone.teamIds.length < cap, fZone.name + ' admite exactamente ' + cap + ' equipos.', 'ZONE_FULL');
       } else {
         ensure(tournament.initialZones(category).length, 'Primero tenés que crear al menos una zona.', 'NO_ZONES');
         ensure(category.currentStage === STAGES.GENERAL, 'No se pueden agregar equipos después de iniciar el torneo.', 'STAGE_LOCKED');
       }
       ensure(trimmed, 'El equipo necesita un nombre.', 'TEAM_NAME_REQUIRED');
       ensure(!teamsOf(category.id).some(function (t) { return t.name.toLowerCase() === trimmed.toLowerCase(); }), 'Ya existe un equipo con ese nombre en esta categoría.', 'DUPLICATE_TEAM');
-      if (zoneId && !single) ensure(tournament.isInitialZone(category, zoneId), 'Zona inexistente.', 'ZONE_NOT_FOUND');
+      if (zoneId && !single) {
+        ensure(tournament.isInitialZone(category, zoneId), 'Zona inexistente.', 'ZONE_NOT_FOUND');
+        const targetZone = tournament.zoneById(category, zoneId);
+        const cap = tournament.zoneTargetTeams(category, targetZone);
+        if (cap) ensure(targetZone.teamIds.length < cap, targetZone.name + ' ya completó su cupo de ' + cap + ' equipos.', 'ZONE_FULL');
+      }
       return commit(function () {
         const c = categoryById(category.id);
         const team = { id: newId('team'), name: trimmed, categoryId: c.id, status: STATUS.ACTIVE, stage: single ? STAGES.ZONE_FINAL : STAGES.GENERAL, scoreEntries: [] };
@@ -331,10 +391,18 @@
       return matchesOf(category.id).some(function (r) { return r.zoneId === zoneId; });
     }
 
+    function teamHasInterzonalAssignment(category, teamId) {
+      if (!tournament.isTorneo50(category)) return false;
+      return tournament.interzonalSlots(category).some(function (s) {
+        return s.teamCId === teamId || s.teamDId === teamId;
+      });
+    }
+
     function createZone(name) {
       const category = requireCategory();
       const trimmed = String(name || '').trim();
       requireZonesFormat(category);
+      ensure(!tournament.isTorneo50(category) && !tournament.isTorneo60(category), 'Esta categoría ya tiene sus zonas oficiales definidas por reglamento.', 'FIXED_ZONES');
       requireFirstStageOpen(category);
       ensure(trimmed, 'La zona necesita un nombre.', 'ZONE_NAME_REQUIRED');
       ensure(!tournament.flow(category).zones.some(function (z) { return z.name.toLowerCase() === trimmed.toLowerCase(); }), 'Ya existe una zona con ese nombre.', 'DUPLICATE_ZONE');
@@ -363,8 +431,14 @@
       requireZonesFormat(category);
       ensure(team && team.categoryId === category.id && tournament.isInitialZone(category, zoneId), 'Equipo o zona inválidos.', 'INVALID_ASSIGNMENT');
       requireFirstStageOpen(category, 'La distribución ya fue cerrada.');
+      const targetZone = tournament.zoneById(category, zoneId);
+      const cap = tournament.zoneTargetTeams(category, targetZone);
+      if (cap && targetZone.teamIds.indexOf(teamId) < 0) {
+        ensure(targetZone.teamIds.length < cap, targetZone.name + ' ya completó su cupo de ' + cap + ' equipos.', 'ZONE_FULL');
+      }
       const existing = tournament.teamInitialZone(category, teamId);
       if (existing && existing.id !== zoneId) {
+        ensure(!teamHasInterzonalAssignment(category, teamId), 'No se puede cambiar de zona a un equipo que ya tiene cruce Interzonal C-D asignado. Limpiá primero ese cruce.', 'TEAM_IN_INTERZONAL');
         ensure(!zoneHasResults(category, existing.id) && !zoneHasResults(category, zoneId), 'No se puede mover el equipo después de registrar resultados en la zona. Primero corregí o eliminá esos resultados para mantener la clasificación consistente.', 'ZONE_HAS_RESULTS');
       }
       return commit(function () {
@@ -381,6 +455,7 @@
       requireZonesFormat(category);
       ensure(tournament.isInitialZone(category, zoneId), 'Zona inexistente.', 'ZONE_NOT_FOUND');
       ensure(category.currentStage === STAGES.GENERAL, 'No se puede modificar una etapa cerrada.', 'STAGE_LOCKED');
+      ensure(!teamHasInterzonalAssignment(category, teamId), 'No se puede quitar un equipo que tiene cruce Interzonal C-D asignado. Limpiá primero ese cruce.', 'TEAM_IN_INTERZONAL');
       ensure(!zoneHasResults(category, zoneId), 'No se puede quitar un equipo de una zona con resultados. Primero corregí o eliminá esos resultados para mantener la clasificación consistente.', 'ZONE_HAS_RESULTS');
       return commit(function () {
         const zone = tournament.zoneById(categoryById(category.id), zoneId);
@@ -393,6 +468,7 @@
       const category = requireCategory();
       const zone = tournament.zoneById(category, id);
       ensure(zone && tournament.isInitialZone(category, id), 'No se puede eliminar esta zona.', 'ZONE_NOT_FOUND');
+      ensure(!tournament.isTorneo50(category) && !tournament.isTorneo60(category), 'No se pueden eliminar las zonas reglamentarias de esta categoría.', 'FIXED_ZONES');
       requireFirstStageOpen(category);
       return commit(function () {
         const c = categoryById(category.id);
@@ -408,12 +484,85 @@
     }
 
     // -------------------------------------------------------------------------
+    // Selector Interzonal C-D (Categoría +50)
+    // -------------------------------------------------------------------------
+
+    function setInterzonalPair(slot, teamCId, teamDId, options) {
+      const category = requireCategory();
+      ensure(tournament.isTorneo50(category), 'El selector Interzonal C-D solo aplica a Categoría +50.', 'INVALID_FORMAT');
+      requireFirstStageOpen(category, 'No se puede modificar el Interzonal C-D porque la Fase 1 ya fue cerrada.');
+      const slotNum = Number(slot);
+      ensure(slotNum === 1 || slotNum === 2 || slotNum === 3, 'El enfrentamiento interzonal debe ser 1, 2 o 3.', 'INVALID_SLOT');
+      ensure(teamCId && teamDId, 'No se pueden guardar enfrentamientos incompletos. Seleccioná un equipo de Zona C y uno de Zona D.', 'INCOMPLETE_INTERZONAL');
+      const { zoneC, zoneD } = tournament.interzonalZones(category);
+      ensure(zoneC && zoneD, 'Deben existir Zona C y Zona D.', 'ZONES_NOT_FOUND');
+      ensure(teamCId !== teamDId, 'No podés seleccionar al mismo equipo.', 'INVALID_TEAMS');
+      const teamCInC = zoneC.teamIds.indexOf(teamCId) >= 0;
+      const teamDInD = zoneD.teamIds.indexOf(teamDId) >= 0;
+      ensure(teamCInC && teamDInD, 'Cada cruce debe enfrentar un equipo de Zona C contra un equipo de Zona D (no equipos de la misma zona).', 'INVALID_INTERZONAL_ZONES');
+
+      const currentSlots = tournament.interzonalSlots(category);
+      const duplicateC = currentSlots.some(function (s) { return s.slot !== slotNum && s.teamCId === teamCId; });
+      const duplicateD = currentSlots.some(function (s) { return s.slot !== slotNum && s.teamDId === teamDId; });
+      ensure(!duplicateC && !duplicateD, 'No se pueden repetir equipos en enfrentamientos diferentes.', 'DUPLICATE_INTERZONAL_TEAM');
+
+      const ctx = context(category.id);
+      const existingSlot = currentSlots.filter(function (s) { return s.slot === slotNum; })[0];
+      const existingMatch = existingSlot && existingSlot.teamCId && existingSlot.teamDId
+        ? tournament.interzonalMatchForSlot(ctx, slotNum, existingSlot)
+        : null;
+      const changed = !existingSlot || existingSlot.teamCId !== teamCId || existingSlot.teamDId !== teamDId;
+      if (existingMatch && changed && !(options && options.force)) {
+        throw new DomainError('Este enfrentamiento ya tiene un resultado cargado. Confirmá el cambio para eliminar el resultado anterior.', 'INTERZONAL_HAS_RESULT');
+      }
+
+      return commit(function () {
+        const c = categoryById(category.id);
+        const f = tournament.flow(c);
+        const nextSlots = tournament.interzonalSlots(c).map(function (s) {
+          return s.slot === slotNum ? { slot: slotNum, teamCId, teamDId } : s;
+        });
+        f.interzonals = nextSlots;
+        if (existingMatch && changed) {
+          state.matchResults = state.matchResults.filter(function (r) { return r.id !== existingMatch.id; });
+        }
+        return nextSlots[slotNum - 1];
+      });
+    }
+
+    function clearInterzonalPair(slot, options) {
+      const category = requireCategory();
+      ensure(tournament.isTorneo50(category), 'El selector Interzonal C-D solo aplica a Categoría +50.', 'INVALID_FORMAT');
+      requireFirstStageOpen(category, 'No se puede modificar el Interzonal C-D porque la Fase 1 ya fue cerrada.');
+      const slotNum = Number(slot);
+      ensure(slotNum === 1 || slotNum === 2 || slotNum === 3, 'El enfrentamiento interzonal debe ser 1, 2 o 3.', 'INVALID_SLOT');
+      const currentSlots = tournament.interzonalSlots(category);
+      const existingSlot = currentSlots.filter(function (s) { return s.slot === slotNum; })[0];
+      const existingMatch = existingSlot && existingSlot.teamCId && existingSlot.teamDId
+        ? tournament.interzonalMatchForSlot(context(category.id), slotNum, existingSlot)
+        : null;
+      if (existingMatch && !(options && options.force)) {
+        throw new DomainError('Este enfrentamiento ya tiene un resultado cargado. Confirmá para limpiar el cruce y eliminar su resultado.', 'INTERZONAL_HAS_RESULT');
+      }
+      return commit(function () {
+        const c = categoryById(category.id);
+        const f = tournament.flow(c);
+        f.interzonals = tournament.interzonalSlots(c).map(function (s) {
+          return s.slot === slotNum ? { slot: slotNum, teamCId: null, teamDId: null } : s;
+        });
+        if (existingMatch) {
+          state.matchResults = state.matchResults.filter(function (r) { return r.id !== existingMatch.id; });
+        }
+      });
+    }
+
+    // -------------------------------------------------------------------------
     // Zona única (Modalidad A): confirmación y reconciliación de clasificados
     // -------------------------------------------------------------------------
 
     /**
-     * Cierra la primera etapa y crea la Zona final con los 2 primeros de cada zona,
-     * transfiriendo sus estadísticas acumuladas de la fase clasificatoria sin duplicar partidos.
+     * Cierra la primera etapa y crea las zonas de Segunda Fase (+40: Zona final; +50: Zonas 1-3; +60: Zonas 1-6),
+     * transfiriendo las estadísticas acumuladas de la fase de grupos sin duplicar partidos.
      */
     function confirmZones() {
       const category = requireCategory();
@@ -425,17 +574,28 @@
         const c = categoryById(category.id);
         const f = tournament.flow(c);
         const qualifiedIds = result.qualifiers.map(function (q) { return q.teamId; });
-        const second = { id: newId('zone'), name: constants.SECOND_STAGE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: qualifiedIds.slice() };
+        const createdZones = result.secondStageAllocations.map(function (spec) {
+          const z = {
+            id: newId('zone'),
+            code: spec.code,
+            name: spec.name,
+            phase: spec.phase,
+            teamIds: spec.teamIds.slice()
+          };
+          if (spec.targetTeams) z.targetTeams = spec.targetTeams;
+          f.zones.push(z);
+          return z;
+        });
         f.qualified = result.qualifiers.map(function (q) {
           return {
             teamId: q.teamId,
             sourceZoneId: q.sourceZoneId,
+            sourceCode: q.sourceCode,
             position: q.position,
             carriedStats: standingsLib.toCarriedStats(q.carriedStats)
           };
         });
-        f.zones.push(second);
-        f.secondStageZoneId = second.id;
+        f.secondStageZoneId = createdZones[0] ? createdZones[0].id : null;
         f.status = ZONE_STATUS.IN_PROGRESS;
         f.firstStageStatus = 'FINISHED';
         f.secondStageStatus = 'IN_PROGRESS';
@@ -453,13 +613,20 @@
       const category = requireCategory();
       const drift = qualificationDrift(category.id);
       if (!drift.applicable || !drift.determinable || !drift.changed) return Object.assign({ toArchive: 0, toRestore: 0 }, drift);
-      const zone = tournament.finalZone(category);
+      const secondZones = tournament.secondStageZones(category);
+      const nextTeamIdsByZoneCode = {};
+      if (drift.secondStageAllocations) {
+        drift.secondStageAllocations.forEach(function (spec) { nextTeamIdsByZoneCode[spec.code] = spec.teamIds; });
+      }
       const nextIds = drift.qualifiers.map(function (q) { return q.teamId; });
       let toArchive = 0;
       let toRestore = 0;
       matchesOf(category.id).forEach(function (r) {
-        if (r.stage !== STAGES.ZONE_FINAL || r.zoneId !== zone.id) return;
-        const inside = nextIds.indexOf(r.winnerId) >= 0 && nextIds.indexOf(r.loserId) >= 0;
+        if (r.stage !== STAGES.ZONE_FINAL) return;
+        const zone = tournament.zoneById(category, r.zoneId);
+        if (!zone || secondZones.indexOf(zone) < 0) return;
+        const pool = (zone.code && nextTeamIdsByZoneCode[zone.code]) || nextIds;
+        const inside = pool.indexOf(r.winnerId) >= 0 && pool.indexOf(r.loserId) >= 0;
         if (!inside && !r.archived) toArchive += 1;
         if (inside && r.archived && r.archivedReason === ARCHIVE_REASONS.QUALIFICATION_CHANGE) toRestore += 1;
       });
@@ -467,9 +634,7 @@
     }
 
     /**
-     * Actualiza los clasificados confirmados para que coincidan con la primera
-     * etapa. Los resultados de zona única de equipos que salen se ARCHIVAN (no se
-     * borran) y se restauran si el equipo vuelve a clasificar.
+     * Actualiza los clasificados confirmados para que coincidan con la primera etapa.
      */
     function reconcileQualifiers() {
       const category = requireCategory();
@@ -480,13 +645,20 @@
       return commit(function () {
         const c = categoryById(category.id);
         const f = tournament.flow(c);
-        const zone = tournament.finalZone(c);
+        const secondZones = tournament.secondStageZones(c);
+        const nextTeamIdsByZoneCode = {};
+        if (preview.secondStageAllocations) {
+          preview.secondStageAllocations.forEach(function (spec) { nextTeamIdsByZoneCode[spec.code] = spec.teamIds; });
+        }
         const nextIds = preview.qualifiers.map(function (q) { return q.teamId; });
-        zone.teamIds = nextIds.slice();
+        secondZones.forEach(function (zone) {
+          zone.teamIds = (zone.code && nextTeamIdsByZoneCode[zone.code]) ? nextTeamIdsByZoneCode[zone.code].slice() : nextIds.slice();
+        });
         f.qualified = preview.qualifiers.map(function (q) {
           return {
             teamId: q.teamId,
             sourceZoneId: q.sourceZoneId,
+            sourceCode: q.sourceCode,
             position: q.position,
             carriedStats: standingsLib.toCarriedStats(q.carriedStats)
           };
@@ -496,8 +668,11 @@
           if (nextIds.indexOf(t.id) >= 0) { t.status = STATUS.QUALIFIED; t.stage = STAGES.ZONE_FINAL; } else if (t.status === STATUS.QUALIFIED) t.status = STATUS.ELIMINATED;
         });
         matchesOf(c.id).forEach(function (r) {
-          if (r.stage !== STAGES.ZONE_FINAL || r.zoneId !== zone.id) return;
-          const inside = nextIds.indexOf(r.winnerId) >= 0 && nextIds.indexOf(r.loserId) >= 0;
+          if (r.stage !== STAGES.ZONE_FINAL) return;
+          const zone = tournament.zoneById(c, r.zoneId);
+          if (!zone || secondZones.indexOf(zone) < 0) return;
+          const pool = (zone.code && nextTeamIdsByZoneCode[zone.code]) || nextIds;
+          const inside = pool.indexOf(r.winnerId) >= 0 && pool.indexOf(r.loserId) >= 0;
           if (!inside && !r.archived) {
             r.archived = true;
             r.archivedReason = ARCHIVE_REASONS.QUALIFICATION_CHANGE;
@@ -566,9 +741,6 @@
 
     /**
      * Determina etapa y zona de un nuevo resultado.
-     * - Primera etapa: zona inicial obligatoria.
-     * - Zona final / única: por defecto la zona final/única. En Modalidad A también se acepta
-     *   una zona inicial como CORRECCIÓN de la primera etapa.
      */
     function resolveTarget(category, zoneId) {
       const f = tournament.flow(category);
@@ -579,9 +751,9 @@
         return { stage: STAGES.GENERAL, zone, correction: false };
       }
       const target = zoneId ? tournament.zoneById(category, zoneId) : tournament.finalZone(category);
-      ensure(target, 'El resultado debe pertenecer a la zona final.', 'ZONE_REQUIRED');
-      if (target.id === f.secondStageZoneId) return { stage: STAGES.ZONE_FINAL, zone: target, correction: false };
-      ensure(!tournament.isSingleZoneFormat(category) && tournament.isInitialZone(category, target.id), 'El resultado debe pertenecer a la zona final.', 'ZONE_REQUIRED');
+      ensure(target, 'El resultado debe pertenecer a una zona válida.', 'ZONE_REQUIRED');
+      if (tournament.isSecondStageZone(category, target.id)) return { stage: STAGES.ZONE_FINAL, zone: target, correction: false };
+      ensure(!tournament.isSingleZoneFormat(category) && tournament.isInitialZone(category, target.id), 'El resultado debe pertenecer a una zona de segunda fase.', 'ZONE_REQUIRED');
       return { stage: STAGES.GENERAL, zone: target, correction: true };
     }
 
@@ -595,14 +767,15 @@
       if (target.zone) {
         const isFinal = target.stage === STAGES.ZONE_FINAL;
         ensure(target.zone.teamIds.indexOf(winner.id) >= 0 && target.zone.teamIds.indexOf(loser.id) >= 0,
-          isFinal ? 'Ambos equipos deben integrar la zona única.' : 'Ambos equipos deben pertenecer a la misma zona.', 'TEAMS_NOT_IN_ZONE');
+          isFinal ? 'Ambos equipos deben integrar la zona seleccionada.' : 'Ambos equipos deben pertenecer a la misma zona.', 'TEAMS_NOT_IN_ZONE');
       }
       if (!target.correction) {
         ensure(LOCKED_STATUSES.indexOf(winner.status) < 0 && LOCKED_STATUSES.indexOf(loser.status) < 0, 'Solo pueden registrar resultados los equipos activos.', 'TEAM_LOCKED');
       }
       const zoneKey = target.zone ? target.zone.id : null;
       const duplicate = tournament.liveMatches(matchesOf(category.id)).some(function (r) {
-        return r.stage === target.stage && r.zoneId === zoneKey && tournament.pairKey(r.winnerId, r.loserId) === tournament.pairKey(winner.id, loser.id);
+        return r.matchType !== constants.MATCH_TYPES.INTERZONAL && r.matchType !== constants.MATCH_TYPES.PLAYOFF &&
+          r.stage === target.stage && r.zoneId === zoneKey && tournament.pairKey(r.winnerId, r.loserId) === tournament.pairKey(winner.id, loser.id);
       });
       ensure(!duplicate, 'Ese cruce ya tiene un resultado. Usá “Corregir” para modificarlo.', 'DUPLICATE_MATCH');
       const normalizedSets = typeof sets === 'undefined' ? [] : scoring.validateMatchSets(sets);
@@ -615,10 +788,29 @@
       if (ctx) tournament.syncCarriedStats(ctx);
     }
 
-    function pushMatch(categoryId, winnerId, loserId, score, validated) {
-      const match = { id: newId('match'), categoryId, winnerId, loserId, score, sets: validated.sets, stage: validated.stage, zoneId: validated.zoneId, createdAt: now() };
+    function syncChampionFromPlayoffs(categoryId) {
+      const category = categoryById(categoryId);
+      if (!category || !tournament.hasPlayoffStageFormat(category)) return;
+      const finalMatch = tournament.findPlayoffMatch(context(categoryId), 'final');
+      category.championId = finalMatch ? finalMatch.winnerId : null;
+      category.runnerUpId = finalMatch ? finalMatch.loserId : null;
+    }
+
+    function pushMatch(categoryId, winnerId, loserId, score, validated, extras) {
+      const match = Object.assign({
+        id: newId('match'),
+        categoryId,
+        winnerId,
+        loserId,
+        score,
+        sets: validated.sets,
+        stage: validated.stage,
+        zoneId: validated.zoneId,
+        createdAt: now()
+      }, extras || {});
       state.matchResults.push(match);
       if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(categoryId);
+      if (match.matchType === constants.MATCH_TYPES.PLAYOFF) syncChampionFromPlayoffs(categoryId);
       return match;
     }
 
@@ -626,7 +818,66 @@
     function createMatchResult(winnerId, loserId, score, sets, zoneId) {
       const category = requireCategory();
       const validated = validateNewMatch(category, winnerId, loserId, score, sets, zoneId);
-      return commit(function () { return pushMatch(category.id, winnerId, loserId, score, validated); }, 'No se pudo guardar el resultado.');
+      return commit(function () { return pushMatch(category.id, winnerId, loserId, score, validated, { matchType: constants.MATCH_TYPES.ZONE }); }, 'No se pudo guardar el resultado.');
+    }
+
+    /** Registra el resultado de un cruce Interzonal C-D asignado en +50. */
+    function createInterzonalMatchFromSets(slot, teamAId, setsA, setsB, setScores) {
+      const category = requireCategory();
+      ensure(tournament.isTorneo50(category), 'Los partidos Interzonales C-D solo aplican a Categoría +50.', 'INVALID_FORMAT');
+      ensure(category.currentStage !== STAGES.FINISHED, 'El torneo ya finalizó.', 'FINISHED');
+      const slotNum = Number(slot);
+      const status = tournament.interzonalStatus(context(category.id));
+      const slotObj = status.slots.filter(function (s) { return s.slot === slotNum; })[0];
+      ensure(slotObj && slotObj.assigned, 'Primero guardá ambos equipos del Enfrentamiento ' + slotNum + ' en Interzonal C-D.', 'INTERZONAL_NOT_ASSIGNED');
+      ensure(!slotObj.match, 'Ese cruce Interzonal C-D ya tiene un resultado cargado.', 'DUPLICATE_MATCH');
+      ensure(teamAId === slotObj.teamCId || teamAId === slotObj.teamDId, 'El equipo indicado no pertenece a este cruce interzonal.', 'INVALID_TEAMS');
+      const teamBId = teamAId === slotObj.teamCId ? slotObj.teamDId : slotObj.teamCId;
+      const parsed = parseSetsInput(setsA, setsB, setScores);
+      const winner = parsed.resolved.teamAWins ? teamAId : teamBId;
+      const loser = parsed.resolved.teamAWins ? teamBId : teamAId;
+      const normalizedSets = typeof parsed.sets === 'undefined' ? [] : scoring.validateMatchSets(parsed.sets);
+      scoring.ensureScoreMatchesSets(parsed.resolved.score, normalizedSets);
+      return commit(function () {
+        return pushMatch(category.id, winner, loser, parsed.resolved.score, {
+          stage: STAGES.GENERAL,
+          zoneId: null,
+          sets: normalizedSets
+        }, {
+          matchType: constants.MATCH_TYPES.INTERZONAL,
+          interzonalSlot: slotNum
+        });
+      }, 'No se pudo guardar el resultado interzonal.');
+    }
+
+    /** Registra el resultado de un cruce final de Día 3 (Semifinales, Final, 3°/4°, 5°/6°, 7°/8°). */
+    function createPlayoffMatchFromSets(bracketId, teamAId, setsA, setsB, setScores) {
+      const category = requireCategory();
+      ensure(tournament.hasPlayoffStageFormat(category), 'Esta categoría no tiene cruces finales de Día 3.', 'INVALID_FORMAT');
+      ensure(category.currentStage !== STAGES.FINISHED, 'El torneo ya finalizó.', 'FINISHED');
+      const po = tournament.computePlayoffs(context(category.id));
+      ensure(po.unlocked, po.reasons.join(' ') || 'Los cruces finales todavía no están habilitados.', 'PLAYOFFS_LOCKED');
+      const slot = po.slots.filter(function (s) { return s.id === bracketId; })[0];
+      ensure(slot && slot.ready, 'Este cruce todavía espera la definición de la llave previa.', 'BRACKET_NOT_READY');
+      ensure(!slot.match, 'Este cruce ya tiene un resultado cargado.', 'DUPLICATE_MATCH');
+      ensure(teamAId === slot.teamA.id || teamAId === slot.teamB.id, 'El equipo indicado no participa de este cruce.', 'INVALID_TEAMS');
+      const teamBId = teamAId === slot.teamA.id ? slot.teamB.id : slot.teamA.id;
+      const parsed = parseSetsInput(setsA, setsB, setScores);
+      const winner = parsed.resolved.teamAWins ? teamAId : teamBId;
+      const loser = parsed.resolved.teamAWins ? teamBId : teamAId;
+      const normalizedSets = typeof parsed.sets === 'undefined' ? [] : scoring.validateMatchSets(parsed.sets);
+      scoring.ensureScoreMatchesSets(parsed.resolved.score, normalizedSets);
+      return commit(function () {
+        return pushMatch(category.id, winner, loser, parsed.resolved.score, {
+          stage: STAGES.PLAYOFFS,
+          zoneId: null,
+          sets: normalizedSets
+        }, {
+          matchType: constants.MATCH_TYPES.PLAYOFF,
+          bracketId: slot.id,
+          bracketLabel: slot.label
+        });
+      }, 'No se pudo guardar el cruce final.');
     }
 
     /** Orienta sets cargados como "equipo 1 – equipo 2" hacia el ganador. */
@@ -676,12 +927,21 @@
           normalizedSets = [];
         }
       }
+      const winnerChanged = match.winnerId !== winnerId;
       match.winnerId = winnerId;
       match.loserId = loserId;
       match.score = score;
       match.sets = normalizedSets;
       match.updatedAt = now();
       if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(match.categoryId);
+      if (match.matchType === constants.MATCH_TYPES.PLAYOFF) {
+        if (winnerChanged && (match.bracketId === 'semi-1' || match.bracketId === 'semi-2')) {
+          state.matchResults = state.matchResults.filter(function (r) {
+            return !(r.categoryId === match.categoryId && r.matchType === constants.MATCH_TYPES.PLAYOFF && (r.bracketId === 'final' || r.bracketId === 'third-place'));
+          });
+        }
+        syncChampionFromPlayoffs(match.categoryId);
+      }
       return match;
     }
 
@@ -714,15 +974,19 @@
       const match = requireEditableMatch(matchId);
       return commit(function () {
         state.matchResults = state.matchResults.filter(function (r) { return r.id !== matchId; });
+        if (match.matchType === constants.MATCH_TYPES.PLAYOFF && (match.bracketId === 'semi-1' || match.bracketId === 'semi-2')) {
+          state.matchResults = state.matchResults.filter(function (r) {
+            return !(r.categoryId === match.categoryId && r.matchType === constants.MATCH_TYPES.PLAYOFF && (r.bracketId === 'final' || r.bracketId === 'third-place'));
+          });
+        }
         if (match.stage === STAGES.GENERAL) syncCategoryCarriedStats(match.categoryId);
+        if (match.matchType === constants.MATCH_TYPES.PLAYOFF) syncChampionFromPlayoffs(match.categoryId);
       }, 'No se pudo guardar la eliminación.');
     }
 
     /**
      * Simula un cambio sobre un resultado y responde si alteraría a los
      * clasificados ya confirmados de la zona única. No guarda nada.
-     * @param {'update'|'updateFromSets'|'delete'|'createFromSets'} kind
-     * @param {Array} args Mismos argumentos que el caso de uso correspondiente.
      */
     function previewQualificationImpact(kind, args) {
       const category = requireCategory();
@@ -757,16 +1021,19 @@
       categoryEntries, context, standings, classificationPoints, resultPoints: scoring.resultPoints,
       zoneRanking, zoneProgress, qualification, finalClassification,
       qualificationDrift, phase, previewReconcile, previewQualificationImpact,
+      interzonalStatus, playoffs, finalStandings,
       // categorías y preferencias
-      selectCategory, setTheme, createCategory, editCategory, deleteCategory, convertToSingleZone,
+      selectCategory, setTheme, createCategory, editCategory, deleteCategory, convertToSingleZone, preloadTeams68,
       // equipos y cargas
       createTeam, deleteTeam, createScoreEntry, addQuickScores, deleteScoreEntry,
-      // zonas
+      // zonas e interzonal C-D
       createZone, renameZone, assignTeamToZone, removeTeamFromZone, deleteZone,
-      // zona única y empates
+      setInterzonalPair, clearInterzonalPair,
+      // segunda etapa y empates
       confirmZones, reconcileQualifiers, resolveTie, clearTieResolution,
       // resultados
-      createMatchResult, createMatchFromSets, updateMatchResult, updateMatchFromSets, deleteMatchResult,
+      createMatchResult, createMatchFromSets, createInterzonalMatchFromSets, createPlayoffMatchFromSets,
+      updateMatchResult, updateMatchFromSets, deleteMatchResult,
       // persistencia
       reload: function () { state = repository.load(); return getState(); },
       save: function () { return repository.save(state); }

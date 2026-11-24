@@ -71,9 +71,9 @@ describe('Transferencia y continuidad de estadísticas hacia la Zona Final', () 
     assert.equal(rowA1.setRatio, 6 / 2);
     assert.equal(rowA1.ptosRatio, 128 / 98);
 
-    // Verificar b1 también (1 triunfo 2-0 + 1 triunfo 2-1 = 5 pts, 2 PJ, 2 PG, 0 PP, 4 SF, 1 SE, PF=70, PC=53, DIF=17)
+    // Verificar b1 también (1 triunfo 2-0 + 1 triunfo 2-1 = 6 pts, 2 PJ, 2 PG, 0 PP, 4 SF, 1 SE, PF=70, PC=53, DIF=17)
     const rowB1 = finalRows.find((r) => r.team.id === b1.id);
-    assert.equal(rowB1.classificationPoints, 5);
+    assert.equal(rowB1.classificationPoints, 6);
     assert.equal(rowB1.resultCount, 2);
     assert.equal(rowB1.wins, 2);
     assert.equal(rowB1.losses, 0);
@@ -165,10 +165,10 @@ describe('Transferencia y continuidad de estadísticas hacia la Zona Final', () 
     assert.equal(reloadedA1.pointsFor, 158);
     assert.equal(reloadedA1.pointsAgainst, 115);
 
-    // Al editar el partido de Zona Final a 2-1, se recalcula limpiamente (10 + 2 = 12 pts)
+    // Al editar el partido de Zona Final a 2-1, se recalcula limpiamente (10 + 3 = 13 pts)
     service.updateMatchFromSets(finalMatch.id, a1.id, 2, 1, [{ a: 15, b: 12 }, { a: 10, b: 15 }, { a: 15, b: 5 }]);
     const afterEditA1 = service.standings(cat.id, 'ZONE_FINAL', finalZoneId).find((r) => r.team.id === a1.id);
-    assert.equal(afterEditA1.classificationPoints, 12);
+    assert.equal(afterEditA1.classificationPoints, 13);
     assert.equal(afterEditA1.resultCount, 5);
     assert.equal(afterEditA1.won20, 3);
     assert.equal(afterEditA1.won21, 1);
@@ -338,8 +338,8 @@ describe('Transferencia y continuidad de estadísticas hacia la Zona Final', () 
     assert.equal(rowAguilas.difference, 24);
     assert.equal(rowAguilas.won20, 2);
 
-    // Condores: 2 + 1 = 3 pts, 2 PJ, 1 PG, 1 PP, 2 SF, 3 SE, 55 PF, 67 PC, -12 DIF
-    assert.equal(rowCondores.classificationPoints, 3);
+    // Condores: 3 + 1 = 4 pts, 2 PJ, 1 PG, 1 PP, 2 SF, 3 SE, 55 PF, 67 PC, -12 DIF
+    assert.equal(rowCondores.classificationPoints, 4);
     assert.equal(rowCondores.resultCount, 2);
     assert.equal(rowCondores.wins, 1);
     assert.equal(rowCondores.losses, 1);
@@ -358,7 +358,7 @@ describe('Transferencia y continuidad de estadísticas hacia la Zona Final', () 
     // Si se corrige un partido de fase clasificatoria, se sincronizan carriedStats y Zona Final
     api.updateMatchResult(genMatchA.id, '2-1', [{ a: 15, b: 10 }, { a: 10, b: 15 }, { a: 15, b: 11 }]);
     const afterGenEdit = api.calculateStandings(cat.id, 'ZONE_FINAL', finalZoneId).find((r) => r.team.id === a1.id);
-    assert.equal(afterGenEdit.classificationPoints, 5); // 2 (2-1 en Zona 1) + 3 (2-0 en Zona Final)
+    assert.equal(afterGenEdit.classificationPoints, 6); // 3 (2-1 en Zona 1) + 3 (2-0 en Zona Final)
     assert.equal(afterGenEdit.pointsFor, 70); // 40 + 30
     assert.equal(afterGenEdit.pointsAgainst, 51); // 36 + 15
 
@@ -379,7 +379,7 @@ describe('Transferencia y continuidad de estadísticas hacia la Zona Final', () 
 
     const api2 = context2.window.PuntajeNewcom;
     const reloadedRow = api2.calculateStandings(cat.id, 'ZONE_FINAL', finalZoneId).find((r) => r.team.id === a1.id);
-    assert.equal(reloadedRow.classificationPoints, 5);
+    assert.equal(reloadedRow.classificationPoints, 6);
     assert.equal(reloadedRow.resultCount, 2);
     assert.equal(reloadedRow.pointsFor, 70);
     assert.equal(reloadedRow.pointsAgainst, 51);

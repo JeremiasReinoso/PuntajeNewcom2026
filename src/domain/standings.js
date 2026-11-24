@@ -3,7 +3,7 @@
  *
  * Sistema de puntuación oficial 3-2-1:
  *   - Victoria 2-0: 3 puntos para el ganador, 1 punto para el perdedor.
- *   - Victoria 2-1: 2 puntos para el ganador, 1 punto para el perdedor.
+ *   - Victoria 2-1: 3 puntos para el ganador, 2 punto para el perdedor.
  *
  * Criterios de orden en cascada:
  *   1. Más puntos de clasificación (3, 2 y 1 por partido).

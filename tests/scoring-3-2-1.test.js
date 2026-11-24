@@ -16,13 +16,13 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
   it('asigna exactamente 2 puntos al ganador y 1 punto al perdedor en victoria 2-1', () => {
     const pts = scoring.resultPoints('2-1');
-    assert.deepEqual(pts, { winner: 2, loser: 1 });
+    assert.deepEqual(pts, { winner: 3, loser: 2 });
     assert.ok(pts.winner > pts.loser, 'El ganador siempre debe recibir más puntos que el perdedor');
   });
 
   it('normaliza resultados vistos desde el perdedor (0-2 y 1-2) respetando la regla 3-2-1', () => {
     assert.deepEqual(scoring.resultPoints('0-2'), { winner: 3, loser: 1 });
-    assert.deepEqual(scoring.resultPoints('1-2'), { winner: 2, loser: 1 });
+    assert.deepEqual(scoring.resultPoints('1-2'), { winner: 3, loser: 2 });
   });
 
   it('rechaza resultados fuera del sistema 2-0 / 2-1', () => {
@@ -47,13 +47,13 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
     const table = service.standings(category.id, 'GENERAL', zone.id);
     assert.equal(table[0].team.id, teamA.id, 'El ganador 2-1 debe liderar la tabla por puntos de clasificación');
-    assert.equal(table[0].classificationPoints, 2);
+    assert.equal(table[0].classificationPoints, 3);
     assert.equal(table[0].pointsFor, 35);
     assert.equal(table[0].pointsAgainst, 43);
     assert.equal(table[0].difference, -8);
 
     assert.equal(table[1].team.id, teamB.id);
-    assert.equal(table[1].classificationPoints, 1);
+    assert.equal(table[1].classificationPoints, 2);
     assert.equal(table[1].pointsFor, 43);
     assert.equal(table[1].pointsAgainst, 35);
     assert.equal(table[1].difference, 8);
@@ -67,17 +67,17 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
     // A gana 2-0 a B -> A: 3 pts, B: 1 pt
     play(service, a, '2-0', b, zone.id);
-    // A gana 2-1 a C -> A: +2 = 5 pts, C: 1 pt
+    // A gana 2-1 a C -> A: +3 = 6 pts, C: 2 pts
     play(service, a, '2-1', c, zone.id);
-    // B gana 2-1 a C -> B: +2 = 3 pts, C: +1 = 2 pts
+    // B gana 2-1 a C -> B: +3 = 4 pts (DIF -11), C: +2 = 4 pts (DIF -2)
     play(service, b, '2-1', c, zone.id);
 
     const rows = service.standings(category.id, 'GENERAL', zone.id);
-    assert.deepEqual(rows.map((r) => r.team.id), [a.id, b.id, c.id]);
-    assert.deepEqual(rows.map((r) => r.classificationPoints), [5, 3, 2]);
-    assert.equal(service.classificationPoints(a.id, 'GENERAL', zone.id), 5);
-    assert.equal(service.classificationPoints(b.id, 'GENERAL', zone.id), 3);
-    assert.equal(service.classificationPoints(c.id, 'GENERAL', zone.id), 2);
+    assert.deepEqual(rows.map((r) => r.team.id), [a.id, c.id, b.id]);
+    assert.deepEqual(rows.map((r) => r.classificationPoints), [6, 4, 4]);
+    assert.equal(service.classificationPoints(a.id, 'GENERAL', zone.id), 6);
+    assert.equal(service.classificationPoints(b.id, 'GENERAL', zone.id), 4);
+    assert.equal(service.classificationPoints(c.id, 'GENERAL', zone.id), 4);
   });
 
   it('recalcula puntos de clasificación y estadísticas automáticamente al modificar o eliminar un resultado', () => {
@@ -92,11 +92,11 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
     assert.equal(rows.find((r) => r.team.id === teamA.id).classificationPoints, 3);
     assert.equal(rows.find((r) => r.team.id === teamB.id).classificationPoints, 1);
 
-    // Se modifica a victoria 2-1 de A -> A=2, B=1
+    // Se modifica a victoria 2-1 de A -> A=3, B=2
     service.updateMatchFromSets(match.id, teamA.id, 2, 1, SETS['2-1']);
     rows = service.standings(category.id, 'GENERAL', zone.id);
-    assert.equal(rows.find((r) => r.team.id === teamA.id).classificationPoints, 2);
-    assert.equal(rows.find((r) => r.team.id === teamB.id).classificationPoints, 1);
+    assert.equal(rows.find((r) => r.team.id === teamA.id).classificationPoints, 3);
+    assert.equal(rows.find((r) => r.team.id === teamB.id).classificationPoints, 2);
     assert.equal(rows.find((r) => r.team.id === teamA.id).pointsFor, 39);
     assert.equal(rows.find((r) => r.team.id === teamA.id).pointsAgainst, 38);
 
@@ -136,10 +136,10 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
     // t1: 1 victoria 2-0 = 3 pts
     assert.equal(byId[t1.id].classificationPoints, 3);
-    // t2: 1 derrota 0-2 (1 pt) + 1 victoria 2-1 (2 pts) = 3 pts
-    assert.equal(byId[t2.id].classificationPoints, 3);
-    // t3: 1 derrota 1-2 = 1 pt
-    assert.equal(byId[t3.id].classificationPoints, 1);
+    // t2: 1 derrota 0-2 (1 pt) + 1 victoria 2-1 (3 pts) = 4 pts
+    assert.equal(byId[t2.id].classificationPoints, 4);
+    // t3: 1 derrota 1-2 = 2 pts
+    assert.equal(byId[t3.id].classificationPoints, 2);
   });
 
   it('valida estrictamente sets inválidos o tercer set innecesario tras un 2-0', () => {
@@ -216,7 +216,7 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
     const api = context.window.PuntajeNewcom;
     assert.deepEqual({ ...api.resultPoints('2-0') }, { winner: 3, loser: 1 });
-    assert.deepEqual({ ...api.resultPoints('2-1') }, { winner: 2, loser: 1 });
+    assert.deepEqual({ ...api.resultPoints('2-1') }, { winner: 3, loser: 2 });
     assert.throws(() => api.resultPoints('3-0'), /2–0 o 2–1/);
 
     const cat = api.createCategory('Categoría +60');
@@ -230,16 +230,16 @@ describe('Sistema de puntuación 3-2-1 de PuntajeNewcom', () => {
 
     let table = api.calculateStandings(cat.id, 'ZONE_FINAL', zoneId);
     const map1 = Object.fromEntries(table.map((r) => [r.team.id, r]));
-    assert.equal(map1[tA.id].classificationPoints, 5); // 3 (2-0) + 2 (2-1)
+    assert.equal(map1[tA.id].classificationPoints, 6); // 3 (2-0) + 3 (2-1)
     assert.equal(map1[tB.id].classificationPoints, 1); // 1 (0-2)
-    assert.equal(map1[tC.id].classificationPoints, 1); // 1 (1-2)
+    assert.equal(map1[tC.id].classificationPoints, 2); // 2 (1-2)
 
     // Modificar m1 de 2-0 a 1-2 (gana B 2-1)
     api.updateMatchFromSets(m1.id, tA.id, 1, 2, SETS['1-2']);
     table = api.calculateStandings(cat.id, 'ZONE_FINAL', zoneId);
     const map2 = Object.fromEntries(table.map((r) => [r.team.id, r]));
-    assert.equal(map2[tA.id].classificationPoints, 3); // 1 (1-2) + 2 (2-1)
-    assert.equal(map2[tB.id].classificationPoints, 2); // 2 (2-1)
-    assert.equal(map2[tC.id].classificationPoints, 1); // 1 (1-2)
+    assert.equal(map2[tA.id].classificationPoints, 5); // 2 (1-2) + 3 (2-1)
+    assert.equal(map2[tB.id].classificationPoints, 3); // 3 (2-1)
+    assert.equal(map2[tC.id].classificationPoints, 2); // 2 (1-2)
   });
 });

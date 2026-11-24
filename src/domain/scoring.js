@@ -3,7 +3,7 @@
  *
  * - Resultados permitidos: 2-0 y 2-1 (vistos desde el ganador; 1-2 y 0-2 desde el perdedor).
  * - 2-0 → 3 puntos al ganador, 1 al perdedor.
- * - 2-1 → 2 puntos al ganador, 1 al perdedor.
+ * - 2-1 → 3 puntos al ganador, 2 al perdedor.
  * - Los marcadores por set alimentan puntos a favor (PF) y en contra (PC).
  *
  * Capa: domain. Funciones puras.
@@ -25,11 +25,11 @@
   /**
    * Tabla oficial inmutable del sistema de puntuación 3-2-1:
    * - Victoria 2-0: 3 puntos para el ganador, 1 punto para el perdedor.
-   * - Victoria 2-1: 2 puntos para el ganador, 1 punto para el perdedor.
+   * - Victoria 2-1: 3 puntos para el ganador, 2 punto para el perdedor.
    */
   const SCORE_POINTS = Object.freeze({
     '2-0': Object.freeze({ winner: 3, loser: 1 }),
-    '2-1': Object.freeze({ winner: 2, loser: 1 })
+    '2-1': Object.freeze({ winner: 3, loser: 2 })
   });
 
   function isValidScore(score) {

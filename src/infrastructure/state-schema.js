@@ -64,35 +64,68 @@
     }) : [];
   }
 
+  function normalizeInterzonals(source, teamIds) {
+    const raw = Array.isArray(source) ? source : [];
+    const bySlot = {};
+    const usedC = {};
+    const usedD = {};
+    raw.forEach(function (item) {
+      if (!item || (item.slot !== 1 && item.slot !== 2 && item.slot !== 3)) return;
+      const cId = typeof item.teamCId === 'string' && teamIds[item.teamCId] && !usedC[item.teamCId] ? item.teamCId : null;
+      const dId = typeof item.teamDId === 'string' && teamIds[item.teamDId] && !usedD[item.teamDId] && item.teamDId !== cId ? item.teamDId : null;
+      if (cId && dId) {
+        usedC[cId] = true;
+        usedD[dId] = true;
+        bySlot[item.slot] = { slot: item.slot, teamCId: cId, teamDId: dId };
+      } else {
+        bySlot[item.slot] = { slot: item.slot, teamCId: null, teamDId: null };
+      }
+    });
+    return [1, 2, 3].map(function (slot) {
+      return bySlot[slot] || { slot, teamCId: null, teamDId: null };
+    });
+  }
+
+  function normalizeZonePhase(zone, secondStageId) {
+    if (isOneOf(constants.ZONE_PHASES, zone.phase)) return zone.phase;
+    if (secondStageId && zone.id === secondStageId) return constants.ZONE_PHASES.FINAL;
+    return constants.ZONE_PHASES.QUALIFYING;
+  }
+
   function normalizeZoneTournament(source, teamIds) {
     const raw = source || {};
     const secondStageId = typeof raw.secondStageZoneId === 'string' ? raw.secondStageZoneId : null;
     const zones = Array.isArray(raw.zones) ? raw.zones.filter(function (zone) {
       return zone && isNonEmptyString(zone.id) && isNonEmptyString(zone.name);
     }).map(function (zone) {
-      const isFinalPhase = zone.phase === constants.ZONE_PHASES.FINAL || (secondStageId && zone.id === secondStageId);
-      return {
+      const normalized = {
         id: zone.id,
         name: zone.name.trim(),
-        phase: isFinalPhase ? constants.ZONE_PHASES.FINAL : constants.ZONE_PHASES.QUALIFYING,
+        phase: normalizeZonePhase(zone, secondStageId),
         teamIds: Array.isArray(zone.teamIds) ? zone.teamIds.filter(function (id) { return teamIds[id]; }) : []
       };
+      if (typeof zone.code === 'string' && zone.code) normalized.code = zone.code;
+      if (Number.isInteger(zone.targetTeams) && zone.targetTeams > 0) normalized.targetTeams = zone.targetTeams;
+      return normalized;
     }) : [];
+    const hasSecondStage = Boolean(secondStageId || zones.some(function (z) { return z.phase !== constants.ZONE_PHASES.QUALIFYING; }));
     return {
       status: isOneOf(ZONE_STATUS, raw.status) ? raw.status : (zones.length ? ZONE_STATUS.IN_PROGRESS : ZONE_STATUS.CONFIGURING),
-      firstStageStatus: raw.firstStageStatus === 'SKIPPED' ? 'SKIPPED' : (raw.firstStageStatus === 'FINISHED' || secondStageId ? 'FINISHED' : (raw.firstStageStatus || 'CONFIGURING')),
-      secondStageStatus: raw.secondStageStatus === 'IN_PROGRESS' || secondStageId ? 'IN_PROGRESS' : (raw.secondStageStatus || null),
+      firstStageStatus: raw.firstStageStatus === 'SKIPPED' ? 'SKIPPED' : (raw.firstStageStatus === 'FINISHED' || hasSecondStage ? 'FINISHED' : (raw.firstStageStatus || 'CONFIGURING')),
+      secondStageStatus: raw.secondStageStatus === 'IN_PROGRESS' || hasSecondStage ? 'IN_PROGRESS' : (raw.secondStageStatus || null),
       zones,
       secondStageZoneId: secondStageId,
       qualified: Array.isArray(raw.qualified) ? raw.qualified.filter(function (q) {
         return q && teamIds[q.teamId] && typeof q.sourceZoneId === 'string';
       }).map(function (q) {
         const entry = { teamId: q.teamId, sourceZoneId: q.sourceZoneId, position: Number.isInteger(q.position) ? q.position : null };
+        if (typeof q.sourceCode === 'string' && q.sourceCode) entry.sourceCode = q.sourceCode;
         if (q.carriedStats && typeof q.carriedStats === 'object') {
           entry.carriedStats = standings.normalizeCarriedStats(q.carriedStats);
         }
         return entry;
       }) : [],
+      interzonals: normalizeInterzonals(raw.interzonals, teamIds),
       confirmedAt: raw.confirmedAt || null,
       qualificationUpdatedAt: raw.qualificationUpdatedAt || null,
       tieBreaks: normalizeTieBreaks(raw.tieBreaks)
@@ -113,6 +146,10 @@
       zoneId: typeof match.zoneId === 'string' ? match.zoneId : null,
       createdAt: typeof match.createdAt === 'string' ? match.createdAt : new Date().toISOString()
     };
+    if (isOneOf(constants.MATCH_TYPES, match.matchType)) normalized.matchType = match.matchType;
+    if (match.interzonalSlot === 1 || match.interzonalSlot === 2 || match.interzonalSlot === 3) normalized.interzonalSlot = match.interzonalSlot;
+    if (typeof match.bracketId === 'string' && match.bracketId) normalized.bracketId = match.bracketId;
+    if (typeof match.bracketLabel === 'string' && match.bracketLabel) normalized.bracketLabel = match.bracketLabel;
     if (typeof match.originalZoneId === 'string') normalized.originalZoneId = match.originalZoneId;
     if (typeof match.updatedAt === 'string') normalized.updatedAt = match.updatedAt;
     if (match.archived === true) {
@@ -175,6 +212,7 @@
       let fmt = null;
       if (c.format === FORMATS.ROUND_ROBIN || c.format === 'SINGLE_ZONE') fmt = FORMATS.ROUND_ROBIN;
       else if (c.format === FORMATS.ZONES_AND_FINAL || c.format === 'ZONES') fmt = FORMATS.ZONES_AND_FINAL;
+      else if (c.format === FORMATS.TORNEO_50 || c.format === FORMATS.TORNEO_60 || c.format === FORMATS.TORNEO_68) fmt = c.format;
       const category = {
         id: c.id,
         name: c.name.trim(),
@@ -213,13 +251,14 @@
 
     normalizedCategories.forEach(function (category) {
       const f = category.zoneTournament;
-      if (tournament.isSingleZoneFormat(category) || !f.secondStageZoneId || !f.qualified.length) return;
+      if (tournament.isSingleZoneFormat(category) || !f.qualified.length) return;
       const catMatches = matchResults.filter(function (match) { return match.categoryId === category.id && !match.archived; });
       f.qualified.forEach(function (q) {
         const team = teams.filter(function (t) { return t.id === q.teamId; })[0];
         const generalMatches = catMatches.filter(function (match) {
           if (match.stage !== STAGES.GENERAL) return false;
           if (match.winnerId !== q.teamId && match.loserId !== q.teamId) return false;
+          if (match.matchType === constants.MATCH_TYPES.INTERZONAL) return true;
           return !q.sourceZoneId || !match.zoneId || match.zoneId === q.sourceZoneId;
         });
         if (generalMatches.length > 0 && team) {
