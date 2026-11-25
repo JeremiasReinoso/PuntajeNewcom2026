@@ -1,0 +1,290 @@
+/**
+ * Esquema persistido: validación, normalización y migración del estado guardado.
+ *
+ * Responsabilidades:
+ *  - Descartar registros corruptos sin romper la aplicación (mismo criterio que antes).
+ *  - Completar campos nuevos con valores por defecto compatibles.
+ *  - Migración v1 → v2:
+ *      · Agrega `category.format` (ZONES | SINGLE_ZONE).
+ *      · Las categorías "+60" y "+68" en primera etapa con 0 o 1 zona se convierten
+ *        automáticamente a zona única SIN perder datos (ver
+ *        `tournament.convertCategoryToSingleZone`). Si la conversión no es
+ *        inequívoca (varias zonas o etapa avanzada) se mantienen como ZONES y la
+ *        interfaz ofrece una conversión manual explícita.
+ *
+ * Capa: infrastructure (adaptador de persistencia). No accede al DOM ni a localStorage.
+ */
+(function (root, factory) {
+  'use strict';
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(
+      require('../domain/constants.js'),
+      require('../domain/scoring.js'),
+      require('../domain/standings.js'),
+      require('../domain/tournament.js')
+    );
+  } else {
+    const modules = root.PuntajeNewcomModules;
+    modules.stateSchema = factory(modules.constants, modules.scoring, modules.standings, modules.tournament);
+  }
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (constants, scoring, standings, tournament) {
+  'use strict';
+
+  const { STAGES, STATUS, ZONE_STATUS, FORMATS, SCHEMA_VERSION } = constants;
+
+  function emptyState() {
+    return { schemaVersion: SCHEMA_VERSION, categories: [], teams: [], matchResults: [], selectedCategoryId: null, theme: 'light' };
+  }
+
+  function isOneOf(dictionary, value) {
+    return Object.keys(dictionary).some(function (key) { return dictionary[key] === value; });
+  }
+
+  function isNonEmptyString(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+  }
+
+  function normalizeEntry(entry, fallbackStage, deps) {
+    const points = Number(entry && entry.points);
+    if (!Number.isInteger(points) || points < 0) return null;
+    return {
+      id: isNonEmptyString(entry.id) ? entry.id : deps.newId('score'),
+      points,
+      createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : deps.now(),
+      stage: isOneOf(STAGES, entry.stage) ? entry.stage : fallbackStage
+    };
+  }
+
+  function normalizeTieBreaks(source) {
+    return Array.isArray(source) ? source.filter(function (item) {
+      return item && typeof item.scope === 'string' && typeof item.signature === 'string' &&
+        Array.isArray(item.order) && item.order.every(function (id) { return typeof id === 'string'; });
+    }).map(function (item) {
+      return { scope: item.scope, signature: item.signature, order: item.order.slice(), createdAt: item.createdAt || null };
+    }) : [];
+  }
+
+  function normalizeInterzonals(source, teamIds) {
+    const raw = Array.isArray(source) ? source : [];
+    const bySlot = {};
+    const usedC = {};
+    const usedD = {};
+    raw.forEach(function (item) {
+      if (!item || (item.slot !== 1 && item.slot !== 2 && item.slot !== 3)) return;
+      const cId = typeof item.teamCId === 'string' && teamIds[item.teamCId] && !usedC[item.teamCId] ? item.teamCId : null;
+      const dId = typeof item.teamDId === 'string' && teamIds[item.teamDId] && !usedD[item.teamDId] && item.teamDId !== cId ? item.teamDId : null;
+      if (cId && dId) {
+        usedC[cId] = true;
+        usedD[dId] = true;
+        bySlot[item.slot] = { slot: item.slot, teamCId: cId, teamDId: dId };
+      } else {
+        bySlot[item.slot] = { slot: item.slot, teamCId: null, teamDId: null };
+      }
+    });
+    return [1, 2, 3].map(function (slot) {
+      return bySlot[slot] || { slot, teamCId: null, teamDId: null };
+    });
+  }
+
+  function normalizeZonePhase(zone, secondStageId) {
+    if (isOneOf(constants.ZONE_PHASES, zone.phase)) return zone.phase;
+    if (secondStageId && zone.id === secondStageId) return constants.ZONE_PHASES.FINAL;
+    return constants.ZONE_PHASES.QUALIFYING;
+  }
+
+  function normalizeZoneTournament(source, teamIds) {
+    const raw = source || {};
+    const secondStageId = typeof raw.secondStageZoneId === 'string' ? raw.secondStageZoneId : null;
+    const zones = Array.isArray(raw.zones) ? raw.zones.filter(function (zone) {
+      return zone && isNonEmptyString(zone.id) && isNonEmptyString(zone.name);
+    }).map(function (zone) {
+      const normalized = {
+        id: zone.id,
+        name: zone.name.trim(),
+        phase: normalizeZonePhase(zone, secondStageId),
+        teamIds: Array.isArray(zone.teamIds) ? zone.teamIds.filter(function (id) { return teamIds[id]; }) : []
+      };
+      if (typeof zone.code === 'string' && zone.code) normalized.code = zone.code;
+      if (Number.isInteger(zone.targetTeams) && zone.targetTeams > 0) normalized.targetTeams = zone.targetTeams;
+      return normalized;
+    }) : [];
+    const hasSecondStage = Boolean(secondStageId || zones.some(function (z) { return z.phase !== constants.ZONE_PHASES.QUALIFYING; }));
+    return {
+      status: isOneOf(ZONE_STATUS, raw.status) ? raw.status : (zones.length ? ZONE_STATUS.IN_PROGRESS : ZONE_STATUS.CONFIGURING),
+      firstStageStatus: raw.firstStageStatus === 'SKIPPED' ? 'SKIPPED' : (raw.firstStageStatus === 'FINISHED' || hasSecondStage ? 'FINISHED' : (raw.firstStageStatus || 'CONFIGURING')),
+      secondStageStatus: raw.secondStageStatus === 'IN_PROGRESS' || hasSecondStage ? 'IN_PROGRESS' : (raw.secondStageStatus || null),
+      zones,
+      secondStageZoneId: secondStageId,
+      qualified: Array.isArray(raw.qualified) ? raw.qualified.filter(function (q) {
+        return q && teamIds[q.teamId] && typeof q.sourceZoneId === 'string';
+      }).map(function (q) {
+        const entry = { teamId: q.teamId, sourceZoneId: q.sourceZoneId, position: Number.isInteger(q.position) ? q.position : null };
+        if (typeof q.sourceCode === 'string' && q.sourceCode) entry.sourceCode = q.sourceCode;
+        if (q.carriedStats && typeof q.carriedStats === 'object') {
+          entry.carriedStats = standings.normalizeCarriedStats(q.carriedStats);
+        }
+        return entry;
+      }) : [],
+      interzonals: normalizeInterzonals(raw.interzonals, teamIds),
+      confirmedAt: raw.confirmedAt || null,
+      qualificationUpdatedAt: raw.qualificationUpdatedAt || null,
+      tieBreaks: normalizeTieBreaks(raw.tieBreaks)
+    };
+  }
+
+  function normalizeMatch(match) {
+    const score = scoring.resolveMatchScore(match);
+    const sets = scoring.matchSetsFor({ score, sets: match.sets });
+    const normalized = {
+      id: match.id,
+      categoryId: match.categoryId,
+      winnerId: match.winnerId,
+      loserId: match.loserId,
+      score,
+      sets: sets.length ? sets : [],
+      stage: isOneOf(STAGES, match.stage) ? match.stage : STAGES.GENERAL,
+      zoneId: typeof match.zoneId === 'string' ? match.zoneId : null,
+      createdAt: typeof match.createdAt === 'string' ? match.createdAt : new Date().toISOString()
+    };
+    if (isOneOf(constants.MATCH_TYPES, match.matchType)) normalized.matchType = match.matchType;
+    if (match.interzonalSlot === 1 || match.interzonalSlot === 2 || match.interzonalSlot === 3) normalized.interzonalSlot = match.interzonalSlot;
+    if (typeof match.bracketId === 'string' && match.bracketId) normalized.bracketId = match.bracketId;
+    if (typeof match.bracketLabel === 'string' && match.bracketLabel) normalized.bracketLabel = match.bracketLabel;
+    if (typeof match.originalZoneId === 'string') normalized.originalZoneId = match.originalZoneId;
+    if (typeof match.updatedAt === 'string') normalized.updatedAt = match.updatedAt;
+    if (match.archived === true) {
+      normalized.archived = true;
+      normalized.archivedReason = typeof match.archivedReason === 'string' ? match.archivedReason : null;
+      normalized.archivedAt = typeof match.archivedAt === 'string' ? match.archivedAt : null;
+    }
+    return normalized;
+  }
+
+  /** ¿Puede convertirse automáticamente una categoría +60/+68 sin ambigüedad? */
+  function canAutoMigrateToSingleZone(category) {
+    return tournament.inferFormat(category.name) === FORMATS.SINGLE_ZONE &&
+      category.currentStage === STAGES.GENERAL &&
+      !category.zoneTournament.secondStageZoneId &&
+      tournament.initialZones(category).length <= 1;
+  }
+
+  /**
+   * Normaliza (y migra) un estado crudo leído del almacenamiento.
+   * @param {unknown} raw
+   * @param {{newId: function(string): string, now: function(): string}} deps
+   * @returns {{state: object, notes: string[]}}
+   */
+  function normalize(raw, deps) {
+    const notes = [];
+    if (!raw || typeof raw !== 'object') return { state: emptyState(), notes };
+
+    const categoryIds = {};
+    const categories = (Array.isArray(raw.categories) ? raw.categories : []).filter(function (c) {
+      if (!c || !isNonEmptyString(c.id) || !isNonEmptyString(c.name) || categoryIds[c.id]) return false;
+      categoryIds[c.id] = true;
+      return true;
+    });
+
+    const teamIds = {};
+    const legacyResults = Array.isArray(raw.results) ? raw.results : [];
+    const teams = (Array.isArray(raw.teams) ? raw.teams : []).filter(function (t) {
+      return t && isNonEmptyString(t.id) && !teamIds[t.id] && isNonEmptyString(t.name) && typeof t.categoryId === 'string' && categoryIds[t.categoryId] && (teamIds[t.id] = true);
+    }).map(function (t) {
+      const stage = isOneOf(STAGES, t.stage) ? t.stage : (isOneOf(STAGES, t.currentStage) ? t.currentStage : STAGES.GENERAL);
+      const sourceEntries = Array.isArray(t.scoreEntries) ? t.scoreEntries : legacyResults.filter(function (r) { return r && r.teamId === t.id; });
+      return {
+        id: t.id,
+        name: t.name.trim(),
+        categoryId: t.categoryId,
+        status: isOneOf(STATUS, t.status) ? t.status : STATUS.ACTIVE,
+        stage,
+        scoreEntries: sourceEntries.map(function (e) { return normalizeEntry(e, stage, deps); }).filter(Boolean)
+      };
+    });
+
+    const matchIds = {};
+    const matchResults = (Array.isArray(raw.matchResults) ? raw.matchResults : []).filter(function (r) {
+      return r && isNonEmptyString(r.id) && !matchIds[r.id] && categoryIds[r.categoryId] && teamIds[r.winnerId] && teamIds[r.loserId] &&
+        r.winnerId !== r.loserId && Boolean(scoring.resolveMatchScore(r)) && (matchIds[r.id] = true);
+    }).map(normalizeMatch);
+
+    const normalizedCategories = categories.map(function (c) {
+      let fmt = null;
+      if (c.format === FORMATS.ROUND_ROBIN || c.format === 'SINGLE_ZONE') fmt = FORMATS.ROUND_ROBIN;
+      else if (c.format === FORMATS.ZONES_AND_FINAL || c.format === 'ZONES') fmt = FORMATS.ZONES_AND_FINAL;
+      else if (c.format === FORMATS.TORNEO_50 || c.format === FORMATS.TORNEO_60 || c.format === FORMATS.TORNEO_68) fmt = c.format;
+      const category = {
+        id: c.id,
+        name: c.name.trim(),
+        format: fmt,
+        currentStage: isOneOf(STAGES, c.currentStage) ? c.currentStage : STAGES.GENERAL,
+        championId: typeof c.championId === 'string' ? c.championId : null,
+        runnerUpId: typeof c.runnerUpId === 'string' ? c.runnerUpId : null,
+        zoneTournament: normalizeZoneTournament(c.zoneTournament, teamIds)
+      };
+      // Una zona sólo puede contener equipos de su propia categoría.
+      category.zoneTournament.zones.forEach(function (zone) {
+        zone.teamIds = zone.teamIds.filter(function (id) {
+          return teams.some(function (team) { return team.id === id && team.categoryId === category.id; });
+        });
+      });
+      return category;
+    });
+
+    normalizedCategories.forEach(function (category) {
+      if (category.format) return;
+      if (canAutoMigrateToSingleZone(category)) {
+        tournament.convertCategoryToSingleZone(
+          category,
+          teams.filter(function (team) { return team.categoryId === category.id; }),
+          matchResults.filter(function (match) { return match.categoryId === category.id; }),
+          deps
+        );
+        notes.push('Categoría "' + category.name + '" migrada a modalidad zona única conservando equipos y resultados.');
+      } else {
+        category.format = FORMATS.ZONES;
+        if (tournament.inferFormat(category.name) === FORMATS.SINGLE_ZONE) {
+          notes.push('Categoría "' + category.name + '" conserva su estructura de zonas; puede convertirse manualmente a zona única.');
+        }
+      }
+    });
+
+    normalizedCategories.forEach(function (category) {
+      const f = category.zoneTournament;
+      if (tournament.isSingleZoneFormat(category) || !f.qualified.length) return;
+      const catMatches = matchResults.filter(function (match) { return match.categoryId === category.id && !match.archived; });
+      f.qualified.forEach(function (q) {
+        const team = teams.filter(function (t) { return t.id === q.teamId; })[0];
+        const generalMatches = catMatches.filter(function (match) {
+          if (match.stage !== STAGES.GENERAL) return false;
+          if (match.winnerId !== q.teamId && match.loserId !== q.teamId) return false;
+          if (match.matchType === constants.MATCH_TYPES.INTERZONAL) return true;
+          return !q.sourceZoneId || !match.zoneId || match.zoneId === q.sourceZoneId;
+        });
+        if (generalMatches.length > 0 && team) {
+          q.carriedStats = standings.toCarriedStats(standings.computeStandings([team], generalMatches, { scoreStage: STAGES.GENERAL })[0]);
+        } else if (!q.carriedStats) {
+          q.carriedStats = standings.emptyCarriedStats();
+        }
+      });
+    });
+
+    const selected = typeof raw.selectedCategoryId === 'string' && categoryIds[raw.selectedCategoryId]
+      ? raw.selectedCategoryId
+      : (normalizedCategories[0] ? normalizedCategories[0].id : null);
+
+    return {
+      state: {
+        schemaVersion: SCHEMA_VERSION,
+        categories: normalizedCategories,
+        teams,
+        matchResults,
+        selectedCategoryId: selected,
+        theme: raw.theme === 'dark' ? 'dark' : 'light'
+      },
+      notes
+    };
+  }
+
+  return Object.freeze({ emptyState, normalize, canAutoMigrateToSingleZone });
+}));

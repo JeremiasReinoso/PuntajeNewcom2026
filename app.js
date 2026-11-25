@@ -337,19 +337,120 @@
     return{categories:normalizedCategories,teams:teams,matchResults:matchResults,selectedCategoryId:selected,theme:raw.theme==='dark'?'dark':'light'};
   }
 
-  function loadState(){
+  function canUseDiskApi(){
+    return typeof window!=='undefined'&&Boolean(window.location)&&/^https?:$/i.test(String(window.location.protocol||''))&&typeof XMLHttpRequest==='function';
+  }
+  function fetchDiskState(){
+    if(!canUseDiskApi())return null;
     try{
-      var raw=localStorage.getItem(KEY);
-      if(!raw)return empty();
+      var xhr=new XMLHttpRequest();
+      xhr.open('GET','/api/state?_='+Date.now(),false);
+      xhr.setRequestHeader('Accept','application/json');
+      xhr.send(null);
+      if(xhr.status>=200&&xhr.status<300&&xhr.responseText){
+        var payload=JSON.parse(xhr.responseText);
+        if(payload&&payload.ok)return payload;
+      }
+    }catch(e){
+      console.warn('No se pudo consultar el almacenamiento persistente local.',e);
+    }
+    return null;
+  }
+  function pushDiskState(currentState,reason){
+    if(!canUseDiskApi())return false;
+    try{
+      var xhr=new XMLHttpRequest();
+      xhr.open('POST','/api/state',false);
+      xhr.setRequestHeader('Content-Type','application/json');
+      xhr.send(JSON.stringify({state:currentState,reason:reason||'save'}));
+      return xhr.status>=200&&xhr.status<300;
+    }catch(e){
+      console.warn('No se pudo guardar en el almacenamiento persistente local.',e);
+      return false;
+    }
+  }
+  function createDiskBackup(label){
+    if(!canUseDiskApi())throw Error('El servicio de copias de seguridad en disco no está activo.');
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','/api/backups/create',false);
+    xhr.setRequestHeader('Content-Type','application/json');
+    xhr.send(JSON.stringify({label:label||''}));
+    var payload=xhr.responseText?JSON.parse(xhr.responseText):null;
+    if(!payload||!payload.ok)throw Error((payload&&payload.error)||'No se pudo crear la copia de seguridad.');
+    return payload.backup;
+  }
+  function listDiskBackups(){
+    if(!canUseDiskApi())return[];
+    var xhr=new XMLHttpRequest();
+    xhr.open('GET','/api/backups?_='+Date.now(),false);
+    xhr.setRequestHeader('Accept','application/json');
+    xhr.send(null);
+    var payload=xhr.responseText?JSON.parse(xhr.responseText):null;
+    return payload&&payload.ok&&Array.isArray(payload.backups)?payload.backups:[];
+  }
+  function restoreDiskBackup(backupName,confirmed){
+    if(!canUseDiskApi())throw Error('El servicio de copias de seguridad en disco no está activo.');
+    if(!confirmed){
+      if(typeof confirm!=='function'||!confirm('¿Confirmás restaurar la copia de seguridad "'+backupName+'"? Se guardará automáticamente un respaldo previo de los datos actuales.'))return null;
+    }
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','/api/backups/restore',false);
+    xhr.setRequestHeader('Content-Type','application/json');
+    xhr.send(JSON.stringify({backup:backupName,confirm:true}));
+    var payload=xhr.responseText?JSON.parse(xhr.responseText):null;
+    if(!payload||!payload.ok)throw Error((payload&&payload.error)||'No se pudo restaurar la copia de seguridad.');
+    state=loadState();
+    render();
+    return payload;
+  }
+
+  function loadState(){
+    var diskPayload=fetchDiskState();
+    if(diskPayload&&diskPayload.exists&&diskPayload.state&&typeof diskPayload.state==='object'){
+      try{
+        var diskNormalized=normalize(diskPayload.state);
+        try{localStorage.setItem(KEY,JSON.stringify(diskNormalized));}catch(ignored){}
+        if(JSON.stringify(diskPayload.state)!==JSON.stringify(diskNormalized)){
+          pushDiskState(diskNormalized,'normalize');
+        }
+        return diskNormalized;
+      }catch(e){
+        console.warn('No se pudo normalizar el estado persistente en disco; intentando localStorage.',e);
+      }
+    }
+    var raw=null;
+    try{
+      raw=localStorage.getItem(KEY);
+      if(!raw){
+        var emptyInitial=empty();
+        if(diskPayload&&!diskPayload.exists)pushDiskState(emptyInitial,'init');
+        return emptyInitial;
+      }
       var parsed=JSON.parse(raw),normalized=normalize(parsed);
-      if(JSON.stringify(parsed)!==JSON.stringify(normalized))localStorage.setItem(KEY,JSON.stringify(normalized));
+      if(JSON.stringify(parsed)!==JSON.stringify(normalized)){
+        try{
+          var prevVer=parsed&&Number.isInteger(parsed.schemaVersion)?parsed.schemaVersion:1;
+          var bKey=KEY+'.backup-v'+prevVer;
+          if(!localStorage.getItem(bKey))localStorage.setItem(bKey,raw);
+        }catch(ignored){}
+        localStorage.setItem(KEY,JSON.stringify(normalized));
+      }
+      if(diskPayload&&!diskPayload.exists)pushDiskState(normalized,'migrate-localstorage');
       return normalized;
     }catch(e){
       console.warn('No se pudo leer localStorage; se inició vacío.',e);
+      if(raw){
+        try{localStorage.setItem(KEY+'.corrupt-'+Date.now(),raw);}catch(ignored){}
+      }
       return empty();
     }
   }
-  function saveState(){try{localStorage.setItem(KEY,JSON.stringify(state));return true;}catch(e){console.warn('No se pudo guardar localStorage.',e);return false;}}
+  function saveState(){
+    var savedLocal=false,savedDisk=false;
+    try{localStorage.setItem(KEY,JSON.stringify(state));savedLocal=true;}catch(e){console.warn('No se pudo guardar localStorage.',e);}
+    if(canUseDiskApi()){savedDisk=pushDiskState(state,'save');}
+    return savedDisk||savedLocal;
+  }
   function category(){return state.categories.filter(function(c){return c.id===state.selectedCategoryId;})[0]||null;}
   function teams(categoryId){return state.teams.filter(function(t){return t.categoryId===categoryId;});}
   function teamById(id){return state.teams.filter(function(t){return t.id===id;})[0]||null;}
@@ -2254,6 +2355,11 @@
   };
 
   state=loadState();theme=state.theme==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',theme);
+  if(canUseDiskApi()&&typeof window.addEventListener==='function'){
+    var flushBeforeExit=function(){try{if(state)pushDiskState(state,'unload');}catch(ignored){}};
+    window.addEventListener('pagehide',flushBeforeExit);
+    window.addEventListener('beforeunload',flushBeforeExit);
+  }
   window.PuntajeNewcom={
     getState:function(){return JSON.parse(JSON.stringify(state));},
     FORMATS:FORMATS,ZONE_PHASES:ZONE_PHASES,MATCH_TYPES:MATCH_TYPES,SCORE_POINTS:SCORE_POINTS,DEFAULT_TEAMS_68:DEFAULT_TEAMS_68,
@@ -2272,6 +2378,7 @@
     calculateStandings:standings,
     calculateClassificationPoints:function(id,stage,zoneId){var t=teamById(id);return t?teamClassificationPoints(id,t.categoryId,stage,zoneId):0;},
     calculateTeamPoints:function(id){var t=teamById(id);return t?calculateTeamTotal(t):0;},
+    createBackup:createDiskBackup,listBackups:listDiskBackups,restoreBackup:restoreDiskBackup,
     loadState:loadState,saveState:saveState
   };
   render();

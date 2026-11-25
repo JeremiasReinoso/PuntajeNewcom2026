@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f8a65"/>
+      <stop offset="100%" stop-color="#145c43"/>
+    </linearGradient>
+    <linearGradient id="ball" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff8364"/>
+      <stop offset="100%" stop-color="#eb6549"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="28" fill="url(#bg)"/>
+  <rect x="10" y="10" width="108" height="108" rx="24" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2"/>
+  <circle cx="64" cy="54" r="28" fill="url(#ball)" stroke="#ffffff" stroke-width="3.5"/>
+  <path d="M40 44 C56 54, 72 54, 88 44" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M40 64 C56 54, 72 54, 88 64" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M64 26 C56 44, 56 64, 64 82" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  <rect x="24" y="92" width="80" height="20" rx="8" fill="#ffffff"/>
+  <text x="64" y="106" font-family="sans-serif" font-size="13" font-weight="800" fill="#145c43" text-anchor="middle" letter-spacing="1">NEWCOM</text>
+</svg>
