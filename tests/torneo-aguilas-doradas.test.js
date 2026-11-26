@@ -283,19 +283,187 @@ describe('5° Torneo Nacional «Águilas Doradas» — +50, +60 y +68', () => {
     assert.equal(service.playoffs(cat.id).allComplete, true);
   });
 
-  it('Categoría +68 (8 equipos): Zona Única con precarga de confirmados, Semifinales (1v4, 2v3), Final y 5°–8° directo', () => {
-    const { service } = makeService();
+  it('PRUEBA A — Categoría +68 con 7 equipos: registro flexible, fixture de 21 partidos (6 por equipo y 1 fecha libre), tabla, Top 4, Semifinales, Final, 3° puesto y persistencia', () => {
+    const { service, storage } = makeService();
+    const cat = service.createCategory('Categoría +68', 'torneo_68');
+    const zU = cat.zoneTournament.zones[0];
+    assert.equal(zU.teamIds.length, 0);
+
+    // Validación de cantidad mínima suficiente de equipos (< 4 no permite generar torneo)
+    const teamNames7 = [
+      'Los Nahuel',
+      'Águilas Doradas',
+      'Toninas',
+      'Unidos por el Newcom',
+      'Newen',
+      'Abrojal',
+      'Dubke Ñucom'
+    ];
+    const t1 = service.createTeam(teamNames7[0], zU.id);
+    const t2 = service.createTeam(teamNames7[1], zU.id);
+    const t3 = service.createTeam(teamNames7[2], zU.id);
+    assert.throws(() => service.generateFixture(zU.id), /al menos 4 equipos/);
+    assert.equal(service.playoffs(cat.id).unlocked, false);
+    assert.doesNotMatch(service.playoffs(cat.id).reasons.join(' '), /8 equipos/);
+
+    // No permite duplicar equipos
+    assert.throws(() => service.createTeam('Los Nahuel', zU.id), /Ya existe un equipo/);
+
+    // Registrar los 4 equipos restantes hasta completar 7 equipos inscriptos
+    const t4 = service.createTeam(teamNames7[3], zU.id);
+    const t5 = service.createTeam(teamNames7[4], zU.id);
+    const t6 = service.createTeam(teamNames7[5], zU.id);
+    const t7 = service.createTeam(teamNames7[6], zU.id);
+    const teams7 = [t1, t2, t3, t4, t5, t6, t7];
+
+    assert.equal(service.teamsOf(cat.id).length, 7, 'Deben existir exactamente 7 equipos registrados (sin equipos ficticios)');
+
+    // Generar y verificar el fixture para 7 equipos
+    const fixture = service.generateFixture(zU.id);
+    assert.equal(fixture.valid, true);
+    assert.equal(fixture.teamCount, 7);
+    assert.equal(fixture.totalMatches, 21, 'Con 7 equipos deben generarse exactamente 21 partidos');
+    assert.equal(fixture.matchesPerTeam, 6, 'Cada equipo debe jugar exactamente 6 partidos');
+    assert.equal(fixture.roundsCount, 7, 'El fixture de 7 equipos debe tener 7 fechas/rondas');
+    assert.equal(fixture.hasFreeDates, true, 'Con 7 equipos debe haber fecha libre en cada ronda');
+    assert.equal(fixture.allMatches.length, 21);
+
+    // Verificar que cada equipo juegue exactamente 6 partidos, sin duplicados ni partidos contra sí mismo
+    const pairSet = new Set();
+    for (const m of fixture.allMatches) {
+      assert.ok(m.teamAId && m.teamBId, 'Ningún partido puede incluir equipos ficticios o nulos');
+      assert.notEqual(m.teamAId, m.teamBId, 'Un equipo nunca debe jugar contra sí mismo');
+      const pk = [m.teamAId, m.teamBId].sort().join('|');
+      assert.equal(pairSet.has(pk), false, `Enfrentamiento duplicado detectado: ${pk}`);
+      pairSet.add(pk);
+    }
+    assert.equal(pairSet.size, 21);
+
+    for (const team of teams7) {
+      assert.equal(fixture.matchesByTeam[team.id], 6, `El equipo ${team.name} debe tener exactamente 6 partidos`);
+    }
+
+    // Verificar fechas libres: 1 equipo libre por fecha, y los 7 equipos tienen exactamente 1 fecha libre
+    assert.equal(fixture.freeTeamsByRound.length, 7);
+    const freeTeamIds = fixture.rounds.map((r) => {
+      assert.equal(r.matches.length, 3, `La ${r.name} debe tener 3 partidos reales`);
+      assert.ok(r.freeTeamId, `La ${r.name} debe asignar 1 equipo con fecha libre`);
+      const playingInRound = new Set();
+      r.matches.forEach((m) => {
+        playingInRound.add(m.teamAId);
+        playingInRound.add(m.teamBId);
+      });
+      assert.equal(playingInRound.has(r.freeTeamId), false, 'El equipo con fecha libre no debe jugar en esa misma fecha');
+      return r.freeTeamId;
+    });
+    assert.equal(new Set(freeTeamIds).size, 7, 'Cada uno de los 7 equipos debe tener exactamente una fecha libre');
+
+    // Cargar resultados de los 21 partidos programados en el fixture
+    // El equipo con menor índice en teams7 gana 2-0 (o 2-1 en cruces consecutivos) para ordenar 1°..7°
+    const rankOrder = new Map(teams7.map((t, idx) => [t.id, idx]));
+    for (const m of fixture.allMatches) {
+      const idxA = rankOrder.get(m.teamAId);
+      const idxB = rankOrder.get(m.teamBId);
+      const aWins = idxA < idxB;
+      const closeMatch = Math.abs(idxA - idxB) === 1;
+      if (aWins) {
+        play(service, service.teamById(m.teamAId), closeMatch ? '2-1' : '2-0', service.teamById(m.teamBId), zU.id);
+      } else {
+        play(service, service.teamById(m.teamBId), closeMatch ? '2-1' : '2-0', service.teamById(m.teamAId), zU.id);
+      }
+    }
+
+    // Comprobar tabla de posiciones (PJ=6, PG, PP, PF, PC, DIF, Puntos)
+    const table = service.standings(cat.id, 'ZONE_FINAL', zU.id);
+    assert.equal(table.length, 7);
+    assert.deepEqual(table.map((r) => r.team.id), teams7.map((t) => t.id));
+    table.forEach((row, idx) => {
+      assert.equal(row.resultCount, 6, 'Cada equipo debe registrar PJ = 6');
+      assert.equal(row.wins, 6 - idx, 'PG debe coincidir con victorias reales');
+      assert.equal(row.losses, idx, 'PP debe coincidir con derrotas reales');
+      assert.ok(row.pointsFor > 0 && row.pointsAgainst > 0);
+      assert.equal(row.difference, row.pointsFor - row.pointsAgainst, 'DIF = PF - PC');
+      assert.equal(row.classificationPoints, (6 - idx) * 3 + (idx > 0 ? idx + 1 : 0));
+    });
+
+    // Clasificación de los 4 primeros y generación de Semifinales (1° vs 4° y 2° vs 3°)
+    const po = service.playoffs(cat.id);
+    assert.equal(po.unlocked, true, 'Al completar los 21 partidos de los 7 equipos deben habilitarse las eliminatorias');
+    const s1 = po.slots.find((s) => s.id === 'semi-1');
+    const s2 = po.slots.find((s) => s.id === 'semi-2');
+    assert.equal(s1.teamA.id, teams7[0].id); // 1°
+    assert.equal(s1.teamB.id, teams7[3].id); // 4°
+    assert.equal(s2.teamA.id, teams7[1].id); // 2°
+    assert.equal(s2.teamB.id, teams7[2].id); // 3°
+
+    // Disputar Semifinales -> genera automáticamente Gran Final y 3°/4° puesto
+    service.createPlayoffMatchFromSets('semi-1', s1.teamA.id, 2, 0, SETS['2-0']);
+    service.createPlayoffMatchFromSets('semi-2', s2.teamB.id, 2, 1, SETS['2-1']);
+
+    const po2 = service.playoffs(cat.id);
+    const fin = po2.slots.find((s) => s.id === 'final');
+    const third = po2.slots.find((s) => s.id === 'third-place');
+    assert.equal(fin.ready, true);
+    assert.equal(fin.teamA.id, teams7[0].id);
+    assert.equal(fin.teamB.id, teams7[2].id);
+    assert.equal(third.ready, true);
+    assert.equal(third.teamA.id, teams7[3].id);
+    assert.equal(third.teamB.id, teams7[1].id);
+
+    service.createPlayoffMatchFromSets('final', fin.teamA.id, 2, 0, SETS['2-0']);
+    service.createPlayoffMatchFromSets('third-place', third.teamB.id, 2, 1, SETS['2-1']);
+
+    // Verificar posiciones finales: 1° al 4° por eliminatorias, y 5° al 7° conservan su posición de la tabla general
+    const finalTable = service.finalStandings(cat.id);
+    assert.equal(finalTable.length, 7, 'Con 7 equipos la clasificación final debe tener exactamente 7 puestos');
+    assert.equal(finalTable[0].team.id, teams7[0].id); // 1° Campeón
+    assert.equal(finalTable[1].team.id, teams7[2].id); // 2° Subcampeón
+    assert.equal(finalTable[2].team.id, teams7[1].id); // 3° Puesto
+    assert.equal(finalTable[3].team.id, teams7[3].id); // 4° Puesto
+    assert.equal(finalTable[4].team.id, teams7[4].id); // 5° directo por Tabla General
+    assert.equal(finalTable[5].team.id, teams7[5].id); // 6° directo por Tabla General
+    assert.equal(finalTable[6].team.id, teams7[6].id); // 7° directo por Tabla General
+    assert.equal(service.playoffs(cat.id).allComplete, true);
+
+    // Verificar persistencia al cerrar y volver a abrir el servicio sobre el mismo almacenamiento
+    const { service: reloadedService } = makeService(storage);
+    const reloadedFx = reloadedService.fixture(cat.id, zU.id);
+    assert.equal(reloadedFx.teamCount, 7);
+    assert.equal(reloadedFx.totalMatches, 21);
+    assert.equal(reloadedFx.playedMatchesCount, 21);
+    assert.equal(reloadedService.finalStandings(cat.id).length, 7);
+    assert.equal(reloadedService.finalStandings(cat.id)[0].team.id, teams7[0].id);
+  });
+
+  it('PRUEBA B — Categoría +68 con 8 equipos: fixture de 28 partidos (7 por equipo), tabla, Top 4, Semifinales (1v4, 2v3), Final y 5°–8° directo', () => {
+    const { service, storage } = makeService();
     const cat = service.createCategory('Categoría +68', 'torneo_68', { preloadTeams68: true });
     const zU = cat.zoneTournament.zones[0];
     assert.equal(zU.teamIds.length, 8);
-    assert.throws(() => service.createTeam('Extra', zU.id), /exactamente 8/);
 
     const teams = zU.teamIds.map((id) => service.teamById(id));
     assert.equal(teams[0].name, 'Los Nahuel');
     assert.equal(teams[7].name, 'Corsarios');
 
+    // Comprobar generación automática del fixture para 8 equipos
+    const fixture = service.generateFixture(zU.id);
+    assert.equal(fixture.valid, true);
+    assert.equal(fixture.teamCount, 8);
+    assert.equal(fixture.totalMatches, 28, 'Con 8 equipos deben generarse exactamente 28 partidos');
+    assert.equal(fixture.matchesPerTeam, 7, 'Cada equipo debe disputar exactamente 7 partidos');
+    assert.equal(fixture.roundsCount, 7, 'El fixture de 8 equipos debe organizarse en 7 fechas');
+    assert.equal(fixture.hasFreeDates, false, 'Con 8 equipos (par) no hay fechas libres');
+    assert.equal(fixture.freeTeamsByRound.length, 0);
+    for (const team of teams) {
+      assert.equal(fixture.matchesByTeam[team.id], 7, `El equipo ${team.name} debe tener 7 partidos`);
+    }
+
     // Jugar los 28 partidos (todos contra todos)
     playRoundRobinOrdered(service, teams, zU.id);
+
+    const table = service.standings(cat.id, 'ZONE_FINAL', zU.id);
+    assert.equal(table.length, 8);
+    table.forEach((row) => assert.equal(row.resultCount, 7, 'Cada equipo debe tener PJ = 7'));
 
     const po = service.playoffs(cat.id);
     assert.equal(po.unlocked, true);
@@ -325,10 +493,81 @@ describe('5° Torneo Nacional «Águilas Doradas» — +50, +60 y +68', () => {
     assert.equal(finalTable[6].team.id, teams[6].id);
     assert.equal(finalTable[7].team.id, teams[7].id);
     assert.equal(service.playoffs(cat.id).allComplete, true);
+
+    // Verificar persistencia al recargar
+    const { service: reloaded } = makeService(storage);
+    assert.equal(reloaded.fixture(cat.id, zU.id).totalMatches, 28);
+    assert.equal(reloaded.finalStandings(cat.id).length, 8);
   });
 
-  it('Verifica integración completa de +50, Interzonal C-D, +60, +68 y tabla Partidos Jugados en app.js', () => {
-    const { api, appNode, handlers } = mountApp();
+  it('Verifica adaptación de la interfaz (app.js) y persistencia para +68 con 7 y 8 equipos, además de +50 e Interzonal C-D', () => {
+    const { api, appNode, handlers, storage, code, makeEl } = mountApp();
+
+    // 1. Verificar UI en app.js para Categoría +68 con 7 equipos
+    const cat68 = api.createCategory('Categoría +68 Águilas', 'torneo_68');
+    const z68 = cat68.zoneTournament.zones[0];
+    const names7 = ['Los Nahuel', 'Águilas Doradas', 'Toninas', 'Unidos por el Newcom', 'Newen', 'Abrojal', 'Dubke Ñucom'];
+    const teams7 = names7.map((n) => api.createTeam(n, z68.id));
+
+    const fx7 = api.generateFixture(z68.id);
+    assert.equal(fx7.teamCount, 7);
+    assert.equal(fx7.totalMatches, 21);
+    assert.equal(fx7.matchesPerTeam, 6);
+    assert.equal(fx7.roundsCount, 7);
+    assert.equal(fx7.hasFreeDates, true);
+
+    handlers.views.zones();
+    assert.match(appNode.innerHTML, /7 Equipos Inscriptos \(21 Partidos Programados\)/);
+    assert.match(appNode.innerHTML, /6 partidos/);
+    assert.match(appNode.innerHTML, /Fecha libre:/);
+    assert.doesNotMatch(appNode.innerHTML, /requiere exactamente 8 equipos/);
+
+    // Cargar los 21 partidos de los 7 equipos en app.js
+    for (let i = 0; i < teams7.length; i += 1) {
+      for (let j = i + 1; j < teams7.length; j += 1) {
+        api.addMatchFromSets(teams7[i].id, 2, teams7[j].id, 0, SETS['2-0'], z68.id);
+      }
+    }
+
+    handlers.views.positions();
+    assert.match(appNode.innerHTML, /ZONA ÚNICA · 7 EQUIPOS · 1° AL 4° SEMIFINALES · 5° AL 7° DIRECTO/);
+    assert.match(appNode.innerHTML, /Semifinal 1/);
+    assert.match(appNode.innerHTML, /Semifinal 2/);
+
+    const po7 = api.computePlayoffs();
+    assert.equal(po7.unlocked, true);
+    api.addPlayoffMatchFromSets('semi-1', teams7[0].id, 2, 0, SETS['2-0']);
+    api.addPlayoffMatchFromSets('semi-2', teams7[1].id, 2, 1, SETS['2-1']);
+    api.addPlayoffMatchFromSets('final', teams7[0].id, 2, 0, SETS['2-0']);
+    api.addPlayoffMatchFromSets('third-place', teams7[2].id, 2, 0, SETS['2-0']);
+
+    const final7 = api.computeFinalStandings();
+    assert.equal(final7.length, 7);
+    assert.equal(final7[0].team.id, teams7[0].id);
+    assert.equal(final7[6].team.id, teams7[6].id);
+
+    // Simular cierre y reapertura de app.js con el mismo storage
+    const appNode2 = { innerHTML: '', querySelectorAll() { return []; }, querySelector() { return null; } };
+    const context2 = {
+      window: {},
+      localStorage: storage,
+      document: {
+        documentElement: makeEl(),
+        getElementById(id) { return id === 'app' ? appNode2 : makeEl(); }
+      },
+      FormData: function () {},
+      confirm: () => true,
+      alert: () => {},
+      console
+    };
+    context2.globalThis = context2;
+    vm.createContext(context2);
+    vm.runInContext(code, context2);
+    const apiReloaded = context2.window.PuntajeNewcom;
+    assert.equal(apiReloaded.getFixture(cat68.id, z68.id).totalMatches, 21);
+    assert.equal(apiReloaded.computeFinalStandings().length, 7);
+
+    // 2. Verificar también +50 e Interzonal C-D en app.js
     const cat50 = api.createCategory('Categoría +50', 'torneo_50');
     const [zA, zB, zC, zD] = cat50.zoneTournament.zones;
     const a = ['A1', 'A2', 'A3', 'A4'].map((n) => api.createTeam(n, zA.id));

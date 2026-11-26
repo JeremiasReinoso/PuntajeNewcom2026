@@ -76,7 +76,7 @@
    * - ROUND_ROBIN / SINGLE_ZONE: Todos contra todos en una única zona (genérico).
    * - TORNEO_50: +50 (14 eq.): 4 zonas (A=4, B=4, C=3+Interz, D=3+Interz) → Z1, Z2, Z3 → Cruces Día 3.
    * - TORNEO_60: +60 (18 eq.): 3 zonas (A=6, B=6, C=6) → Z1..Z6 (triangulares) → Cruces Día 3.
-   * - TORNEO_68: +68 (8 eq.): Zona Única (8) → Semifinales (1v4, 2v3), Final, 3°/4° y 5°-8° directo.
+   * - TORNEO_68: +68 (7 u 8+ eq.): Zona Única (todos contra todos) → Semifinales (1v4, 2v3), Final, 3°/4° y resto directo por tabla.
    */
   const FORMATS = Object.freeze({
     ZONES_AND_FINAL: 'zonas_y_final',
@@ -93,7 +93,7 @@
     todos_contra_todos: 'Todos contra todos (zona única)',
     torneo_50: 'Categoría +50 · 14 equipos (4 zonas + Interzonal C-D + Cruces)',
     torneo_60: 'Categoría +60 · 18 equipos (3 zonas de 6 + Triangulares + Cruces)',
-    torneo_68: 'Categoría +68 · 8 equipos (Zona única + Semifinales y Final)'
+    torneo_68: 'Categoría +68 · Zona única + Semifinales y Final'
   });
 
   const MATCH_TYPES = Object.freeze({
