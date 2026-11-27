@@ -191,7 +191,7 @@
         const category = { id: newId('cat'), name: trimmed, format: chosen, currentStage: STAGES.GENERAL, championId: null, runnerUpId: null, zoneTournament: tournament.emptyZoneTournament() };
         if (chosen === FORMATS.ROUND_ROBIN || chosen === FORMATS.TORNEO_68) {
           const singleZone = { id: newId('zone'), code: 'U', name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] };
-          if (chosen === FORMATS.TORNEO_68) singleZone.targetTeams = 8;
+          if (chosen === FORMATS.TORNEO_68) singleZone.targetTeams = 7;
           category.currentStage = STAGES.ZONE_FINAL;
           category.zoneTournament = tournament.singleZoneTournament(singleZone);
           if (chosen === FORMATS.TORNEO_68 && opts && opts.preloadTeams68) {

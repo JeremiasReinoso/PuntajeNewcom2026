@@ -227,6 +227,9 @@
         zone.teamIds = zone.teamIds.filter(function (id) {
           return teams.some(function (team) { return team.id === id && team.categoryId === category.id; });
         });
+        if (category.format === FORMATS.TORNEO_68) {
+          zone.targetTeams = 7;
+        }
       });
       return category;
     });

@@ -10,9 +10,9 @@
  *      Fase 1 (Viernes y Sábado): 3 zonas de 6 equipos (Zonas A, B y C).
  *      Fase 2 (Domingo mañana): Zona 1 (1°A,2°B,1°C), Zona 2 (2°A,1°B,2°C), Zona 3 (3°s → 7°–9°), Zona 4 (4°s → 10°–12°), Zona 5 (5°s → 13°–15°), Zona 6 (6°s → 16°–18°).
  *      Fase 3 (Domingo tarde): Semifinal 1 (1°Z1 vs 2°Z2), Semifinal 2 (1°Z2 vs 2°Z1), Final (1°/2°), 3°/4°, 5°/6° (3°Z1 vs 3°Z2).
- *  - Torneo +68 (`torneo_68`, 8 equipos):
- *      Fase 1 (Días 1 y 2): Zona Única (8 equipos, 28 partidos) → Tabla General 1°–8°.
- *      Fase 2 (Día 3): Semifinal 1 (1° vs 4°), Semifinal 2 (2° vs 3°), Gran Final (1°/2°), 3°/4°; puestos 5°–8° directos por tabla.
+ *  - Torneo +68 (`torneo_68`, 7 equipos):
+ *      Fase 1 (Días 1 y 2): Zona Única (7 equipos, todos contra todos) → Tabla General 1°–7°.
+ *      Fase 2 (Día 3): Semifinal 1 (1° vs 4°), Semifinal 2 (2° vs 3°), Gran Final (1°/2°), 3°/4°; puestos 5°–7° directos por tabla.
  *
  * Capa: domain. Las consultas son puras.
  */
@@ -176,6 +176,7 @@
 
   function zoneTargetTeams(category, zone) {
     if (!category || !zone) return null;
+    if (isTorneo68(category)) return 7;
     if (typeof zone.targetTeams === 'number' && zone.targetTeams > 0) return zone.targetTeams;
     if (isTorneo50(category)) {
       const found50 = TORNEO_50_SPEC.filter(function (s) { return s.code === zone.code || s.name.toLowerCase() === zone.name.toLowerCase(); })[0];
@@ -187,7 +188,6 @@
       if (zone.phase === ZONE_PHASES.QUALIFYING) return 6;
       return 3;
     }
-    if (isTorneo68(category)) return 8;
     return null;
   }
 
@@ -705,7 +705,7 @@
       const zU = finalZone(category);
       const evalU = evaluateSecondStageZone(ctx, zU);
       const reasons = [];
-      if (!evalU.zone || evalU.progress.teamCount !== 8) reasons.push('La Zona única requiere exactamente 8 equipos.');
+      if (!evalU.zone || evalU.progress.teamCount !== 7) reasons.push('La Zona única requiere 7 equipos participantes.');
       else if (!evalU.progress.complete) reasons.push('Faltan ' + evalU.progress.missing + ' de ' + evalU.progress.required + ' partido(s) en la Zona única.');
       if (evalU.unresolvedTies.length) reasons.push('Hay ' + evalU.unresolvedTies.length + ' empate(s) sin resolver en la Zona única.');
       const unlocked = reasons.length === 0;
@@ -754,7 +754,7 @@
         unlocked,
         reasons,
         slots,
-        placementZones: [{ label: 'Puestos 5° al 8° (Directo por Tabla General)', offset: 5, eval: evalU, sliceStart: 4, sliceEnd: 8 }],
+        placementZones: [{ label: 'Clasificación Final del 5° al 7° Puesto (Directo por Tabla General)', offset: 5, eval: evalU, sliceStart: 4, sliceEnd: 7 }],
         allComplete: unlocked && slots.every(function (s) { return Boolean(s.match); })
       };
     }

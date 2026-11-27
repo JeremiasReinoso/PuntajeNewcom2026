@@ -283,19 +283,34 @@ describe('5° Torneo Nacional «Águilas Doradas» — +50, +60 y +68', () => {
     assert.equal(service.playoffs(cat.id).allComplete, true);
   });
 
-  it('Categoría +68 (8 equipos): Zona Única con precarga de confirmados, Semifinales (1v4, 2v3), Final y 5°–8° directo', () => {
+  it('Categoría +68 (7 equipos): Zona Única sin precarga automática por defecto, Semifinales (1v4, 2v3), Final y 5°–7° directo', () => {
     const { service } = makeService();
-    const cat = service.createCategory('Categoría +68', 'torneo_68', { preloadTeams68: true });
+    const cat = service.createCategory('Categoría +68', 'torneo_68');
     const zU = cat.zoneTournament.zones[0];
-    assert.equal(zU.teamIds.length, 8);
-    assert.throws(() => service.createTeam('Extra', zU.id), /exactamente 8/);
+    assert.equal(zU.teamIds.length, 0, 'El sistema debe permitir registrar los equipos correspondientes sin cargarlos automáticamente');
+    assert.equal(zU.targetTeams, 7);
 
-    const teams = zU.teamIds.map((id) => service.teamById(id));
+    const names = [
+      'Los Nahuel',
+      'Águilas Doradas',
+      'Toninas',
+      'Unidos por el Newcom',
+      'Newen',
+      'Abrojal',
+      'Corsarios'
+    ];
+    const teams = names.map((name) => service.createTeam(name, zU.id));
+    assert.equal(teams.length, 7);
+    assert.throws(() => service.createTeam('Octavo Equipo', zU.id), /admite exactamente 7/);
+
     assert.equal(teams[0].name, 'Los Nahuel');
-    assert.equal(teams[7].name, 'Corsarios');
+    assert.equal(teams[6].name, 'Corsarios');
 
-    // Jugar los 28 partidos (todos contra todos)
+    // Jugar los 21 enfrentamientos todos contra todos de los 7 participantes registrados
     playRoundRobinOrdered(service, teams, zU.id);
+
+    const standingsRows = service.standings(cat.id, 'ZONE_FINAL', zU.id);
+    assert.equal(standingsRows.length, 7);
 
     const po = service.playoffs(cat.id);
     assert.equal(po.unlocked, true);
@@ -316,19 +331,56 @@ describe('5° Torneo Nacional «Águilas Doradas» — +50, +60 y +68', () => {
     service.createPlayoffMatchFromSets('third-place', third.teamA.id, 2, 0, SETS['2-0']);
 
     const finalTable = service.finalStandings(cat.id);
-    assert.equal(finalTable.length, 8);
-    assert.equal(finalTable[0].team.id, teams[0].id); // Campeón
-    assert.equal(finalTable[1].team.id, teams[2].id); // Subcampeón
-    // 5° al 8° directos de Tabla General sin partidos extra
+    assert.equal(finalTable.length, 7);
+    assert.equal(finalTable[0].team.id, teams[0].id); // Campeón (1°)
+    assert.equal(finalTable[1].team.id, teams[2].id); // Subcampeón (2°)
+    assert.equal(finalTable[2].team.id, teams[3].id); // 3° puesto
+    assert.equal(finalTable[3].team.id, teams[1].id); // 4° puesto
+    // 5° al 7° directos de Tabla General sin partidos adicionales
+    assert.equal(finalTable[4].position, 5);
     assert.equal(finalTable[4].team.id, teams[4].id);
+    assert.equal(finalTable[5].position, 6);
     assert.equal(finalTable[5].team.id, teams[5].id);
+    assert.equal(finalTable[6].position, 7);
     assert.equal(finalTable[6].team.id, teams[6].id);
-    assert.equal(finalTable[7].team.id, teams[7].id);
     assert.equal(service.playoffs(cat.id).allComplete, true);
   });
 
-  it('Verifica integración completa de +50, Interzonal C-D, +60, +68 y tabla Partidos Jugados en app.js', () => {
+  it('Verifica integración completa de +50, Interzonal C-D, +60, +68 (7 equipos) y tabla Partidos Jugados en app.js', () => {
     const { api, appNode, handlers } = mountApp();
+
+    // 1. Verificar Categoría +68 con 7 equipos en app.js
+    const cat68 = api.createCategory('Categoría +68', 'torneo_68');
+    const z68 = cat68.zoneTournament.zones[0];
+    assert.equal(z68.teamIds.length, 0);
+    const teams68 = api.DEFAULT_TEAMS_68.map((name) => api.createTeam(name, z68.id));
+    assert.equal(teams68.length, 7);
+    assert.throws(() => api.createTeam('Equipo 8', z68.id), /admite exactamente 7/);
+
+    for (let i = 0; i < teams68.length; i += 1) {
+      for (let j = i + 1; j < teams68.length; j += 1) {
+        api.addMatchFromSets(teams68[i].id, 2, teams68[j].id, 0, SETS['2-0'], z68.id);
+      }
+    }
+
+    handlers.views.positions();
+    assert.match(appNode.innerHTML, /ZONA ÚNICA \(7 EQUIPOS\) · 1° AL 4° SEMIFINALES · 5° AL 7° DIRECTO/);
+    assert.match(appNode.innerHTML, /Semifinal 1/);
+    assert.match(appNode.innerHTML, /Semifinal 2/);
+    assert.match(appNode.innerHTML, /Gran Final \(1° y 2° Puesto\)/);
+    assert.match(appNode.innerHTML, /3° y 4° Puesto/);
+    assert.match(appNode.innerHTML, /Clasificación Final del 5° al 7° Puesto/);
+    assert.doesNotMatch(appNode.innerHTML, /5° al 8°|8°/);
+
+    api.addPlayoffMatchFromSets('semi-1', teams68[0].id, 2, 0, SETS['2-0']);
+    api.addPlayoffMatchFromSets('semi-2', teams68[1].id, 2, 0, SETS['2-0']);
+    api.addPlayoffMatchFromSets('final', teams68[0].id, 2, 0, SETS['2-0']);
+    api.addPlayoffMatchFromSets('third-place', teams68[2].id, 2, 0, SETS['2-0']);
+    const final68 = api.computeFinalStandings();
+    assert.equal(final68.length, 7);
+    assert.equal(final68[6].position, 7);
+
+    // 2. Verificar Categoría +50 e Interzonal C-D
     const cat50 = api.createCategory('Categoría +50', 'torneo_50');
     const [zA, zB, zC, zD] = cat50.zoneTournament.zones;
     const a = ['A1', 'A2', 'A3', 'A4'].map((n) => api.createTeam(n, zA.id));
