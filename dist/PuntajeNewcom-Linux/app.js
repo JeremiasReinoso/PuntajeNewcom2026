@@ -8,7 +8,7 @@
         todos_contra_todos:'Todos contra todos · Zona única (Genérico)',
         torneo_50:'Categoría +50 · 14 equipos (4 zonas + Interzonal C-D + Cruces)',
         torneo_60:'Categoría +60 · 18 equipos (3 zonas de 6 + Triangulares + Cruces)',
-        torneo_68:'Categoría +68 · Zona única + Semifinales y Final'
+        torneo_68:'Categoría +68 · 8 equipos (Zona única + Semifinales y Final)'
       },
       ZONE_PHASES={QUALIFYING:'clasificatoria',FINAL:'final',CHAMPIONSHIP:'campeonato',STIMULUS:'estimulo',PLACEMENT:'posicion'},
       ZONE_PHASE_LABELS={clasificatoria:'Fase de grupos',final:'Fase final',campeonato:'Ronda Campeonato',estimulo:'Ronda Estímulo',posicion:'Triangular · Posiciones'},
@@ -52,8 +52,7 @@
     if(isTorneo68(c)){
       var po68=computePlayoffs(c);
       if(po68.unlocked)return'Zona única + Cruces finales (+68)';
-      var fz68=finalZoneOf(c),n68=fz68?fz68.teamIds.length:0;
-      return'Zona única · '+(n68?n68+' equipo'+(n68===1?'':'s'):'En configuración')+' (+68)';
+      return'Zona única · 8 equipos (+68)';
     }
     if(c.format===FORMATS.ROUND_ROBIN)return'Zona única · Todos contra todos';
     if(isTorneo50(c)){
@@ -214,64 +213,6 @@
       return item&&typeof item.scope==='string'&&typeof item.signature==='string'&&Array.isArray(item.order)&&item.order.every(function(id){return typeof id==='string';});
     }).map(function(item){return{scope:item.scope,signature:item.signature,order:item.order.slice(),createdAt:item.createdAt||null};}):[];
   }
-  function buildRoundRobinFixture(teamIds){
-    var cleanIds=[],seen={};
-    (Array.isArray(teamIds)?teamIds:[]).forEach(function(id){
-      if(typeof id==='string'&&id.trim()&&!seen[id]){seen[id]=true;cleanIds.push(id);}
-    });
-    var n=cleanIds.length;
-    if(n<2)return{teamIds:cleanIds,teamCount:n,totalMatches:0,matchesPerTeam:0,roundsCount:0,hasFreeDates:false,rounds:[]};
-    var isOdd=(n%2===1),slots=cleanIds.slice();
-    if(isOdd)slots.push(null);
-    var numSlots=slots.length,numRounds=numSlots-1,half=numSlots/2,rounds=[],seenPairs={},current=slots.slice(),matchCounter=0;
-    for(var r=1;r<=numRounds;r+=1){
-      var roundMatches=[],freeTeamId=null;
-      for(var i=0;i<half;i+=1){
-        var a=current[i],b=current[numSlots-1-i];
-        if(a===null||b===null){
-          freeTeamId=a===null?b:a;
-        }else if(a!==b){
-          var pk=[a,b].sort().join('|');
-          if(!seenPairs[pk]){
-            seenPairs[pk]=true;
-            matchCounter+=1;
-            var teamAId=(i===0&&r%2===0)?b:a;
-            var teamBId=(i===0&&r%2===0)?a:b;
-            roundMatches.push({id:'R'+r+'-M'+(roundMatches.length+1),number:matchCounter,round:r,order:roundMatches.length+1,teamAId:teamAId,teamBId:teamBId});
-          }
-        }
-      }
-      rounds.push({round:r,name:'Fecha '+r,freeTeamId:freeTeamId,matches:roundMatches});
-      var next=[current[0],current[numSlots-1]];
-      for(var k=1;k<numSlots-1;k+=1)next.push(current[k]);
-      current=next;
-    }
-    return{teamIds:cleanIds,teamCount:n,totalMatches:matchCounter,matchesPerTeam:n-1,roundsCount:rounds.length,hasFreeDates:isOdd,rounds:rounds};
-  }
-  function isFixtureSyncedWithZone(fixture,zoneTeamIds){
-    if(!fixture||typeof fixture!=='object'||!Array.isArray(fixture.teamIds)||!Array.isArray(fixture.rounds))return false;
-    if(fixture.teamIds.length!==zoneTeamIds.length)return false;
-    for(var i=0;i<zoneTeamIds.length;i+=1){if(fixture.teamIds[i]!==zoneTeamIds[i])return false;}
-    return true;
-  }
-  function syncZoneFixture(c,z){
-    if(!c||!z)return;
-    var minTeams=isTorneo68(c)?4:2;
-    if(isTorneo68(c)){
-      delete z.targetTeams;
-      if(z.teamIds.length>=minTeams){
-        if(!isFixtureSyncedWithZone(z.fixture,z.teamIds))z.fixture=buildRoundRobinFixture(z.teamIds);
-      }else{
-        delete z.fixture;
-      }
-    }else if(z.fixture){
-      if(z.teamIds.length>=minTeams){
-        if(!isFixtureSyncedWithZone(z.fixture,z.teamIds))z.fixture=buildRoundRobinFixture(z.teamIds);
-      }else{
-        delete z.fixture;
-      }
-    }
-  }
 
   function normalize(raw){
     if(!raw||typeof raw!=='object')return empty();
@@ -320,8 +261,7 @@
         var phase=isZonePhase(z.phase)?z.phase:((z.id===secondStageId||c.format===FORMATS.ROUND_ROBIN||c.format===FORMATS.TORNEO_68)?ZONE_PHASES.FINAL:ZONE_PHASES.QUALIFYING);
         var nz={id:z.id,name:z.name.trim(),phase:phase,teamIds:Array.isArray(z.teamIds)?z.teamIds.filter(function(id){return teamIds[id];}):[]};
         if(typeof z.code==='string'&&z.code)nz.code=z.code;
-        if(Number.isInteger(z.targetTeams)&&z.targetTeams>0&&c.format!==FORMATS.TORNEO_68)nz.targetTeams=z.targetTeams;
-        if(z.fixture&&isFixtureSyncedWithZone(z.fixture,nz.teamIds))nz.fixture=z.fixture;
+        if(Number.isInteger(z.targetTeams)&&z.targetTeams>0)nz.targetTeams=z.targetTeams;
         return nz;
       }):[];
       var hasSecond=Boolean(secondStageId||zones.some(function(z){return z.phase!==ZONE_PHASES.QUALIFYING;}));
@@ -349,10 +289,11 @@
         var finalZone=f.secondStageZoneId?f.zones.filter(function(z){return z.id===f.secondStageZoneId;})[0]:f.zones[0];
         if(!finalZone){
           finalZone={id:uid('zone'),code:'U',name:'Zona única',phase:ZONE_PHASES.FINAL,teamIds:[]};
+          if(isTorneo68(c))finalZone.targetTeams=8;
           f.zones=[finalZone];
         }else{
           finalZone.phase=ZONE_PHASES.FINAL;
-          if(isTorneo68(c)){finalZone.code='U';delete finalZone.targetTeams;}
+          if(isTorneo68(c)){finalZone.code='U';finalZone.targetTeams=8;}
           f.zones=[finalZone];
         }
         f.secondStageZoneId=finalZone.id;
@@ -365,7 +306,6 @@
           t.stage=STAGES.ZONE_FINAL;
           if(t.status===STATUS.ELIMINATED)t.status=STATUS.ACTIVE;
         });
-        syncZoneFixture(c,finalZone);
         matchResults.filter(function(r){return r.categoryId===c.id&&r.matchType!==MATCH_TYPES.PLAYOFF&&r.stage!==STAGES.PLAYOFFS;}).forEach(function(r){
           r.stage=STAGES.ZONE_FINAL;
           r.zoneId=finalZone.id;
@@ -533,6 +473,7 @@
     var fmt=normalizeFormat(format,name);
     var isSingle=fmt===FORMATS.ROUND_ROBIN||fmt===FORMATS.TORNEO_68;
     var singleZone=isSingle?{id:uid('zone'),code:'U',name:'Zona única',phase:ZONE_PHASES.FINAL,teamIds:[]}:null;
+    if(singleZone&&fmt===FORMATS.TORNEO_68)singleZone.targetTeams=8;
     var initZones=[];
     if(fmt===FORMATS.TORNEO_50){
       initZones=TORNEO_50_SPEC.map(function(s){return{id:uid('zone'),code:s.code,name:s.name,phase:ZONE_PHASES.QUALIFYING,targetTeams:s.targetTeams,teamIds:[]};});
@@ -563,7 +504,6 @@
         state.teams.push(t);
         singleZone.teamIds.push(t.id);
       });
-      syncZoneFixture(c,singleZone);
     }
     loaderDraft=null;
     interzonalDraft=null;
@@ -581,7 +521,6 @@
       z.teamIds.push(t.id);
       return t;
     });
-    syncZoneFixture(c,z);
     loaderDraft=null;
     saveState();
     return created;
@@ -607,7 +546,6 @@
   }
   function zoneTargetTeams(c,z){
     if(!c||!z)return null;
-    if(isTorneo68(c))return null;
     if(typeof z.targetTeams==='number'&&z.targetTeams>0)return z.targetTeams;
     if(isTorneo50(c)){
       var found=TORNEO_50_SPEC.filter(function(s){return s.code===z.code||s.name.toLowerCase()===z.name.toLowerCase();})[0];
@@ -616,6 +554,7 @@
       if(z.code==='3')return 6;
     }
     if(isTorneo60(c))return z.phase===ZONE_PHASES.QUALIFYING?6:3;
+    if(isTorneo68(c))return 8;
     return null;
   }
   function createTeam(name,zoneId){
@@ -632,7 +571,6 @@
       var singleTeam={id:uid('team'),name:name,categoryId:c.id,status:STATUS.ACTIVE,stage:STAGES.ZONE_FINAL,scoreEntries:[]};
       state.teams.push(singleTeam);
       if(finalZ&&finalZ.teamIds.indexOf(singleTeam.id)<0)finalZ.teamIds.push(singleTeam.id);
-      if(finalZ)syncZoneFixture(c,finalZ);
       loaderDraft=null;
       saveState();
       return singleTeam;
@@ -867,9 +805,9 @@
     if(!z)throw Error('Zona inexistente.');
     if(teamHasInterzonalAssignment(c,teamId))throw Error('Este equipo tiene un cruce Interzonal C-D asignado. Limpiá primero ese cruce.');
     if(zoneHasResults(c,zoneId))throw Error('No se puede quitar un equipo de una zona con resultados cargados.');
-    if(isSingleZoneCategory(c)){z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});state.teams=state.teams.filter(function(t){return t.id!==teamId;});syncZoneFixture(c,z);loaderDraft=null;saveState();return;}
+    if(isSingleZoneCategory(c)){z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});state.teams=state.teams.filter(function(t){return t.id!==teamId;});loaderDraft=null;saveState();return;}
     if(c.currentStage!==STAGES.GENERAL)throw Error('No se puede modificar una etapa cerrada.');
-    z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});syncZoneFixture(c,z);loaderDraft=null;interzonalDraft=null;saveState();
+    z.teamIds=z.teamIds.filter(function(id){return id!==teamId;});loaderDraft=null;interzonalDraft=null;saveState();
   }
   function deleteZone(id){
     var c=category(),f=zoneFlow(c),z=zoneById(c,id);
@@ -989,76 +927,8 @@
     var hasIz=effectiveStage===STAGES.GENERAL&&isTorneo50(c)&&isInterzonalZone(c,z);
     var izReq=hasIz?3:0,izPlayed=hasIz?Object.keys(interPairs).length:0;
     var req=intReq+izReq,played=intPlayed+izPlayed,target=zoneTargetTeams(c,z);
-    var minTeams=isTorneo68(c)?4:2;
-    var countOk=target?n===target:n>=minTeams;
+    var countOk=target?n===target:n>=2;
     return{teamCount:n,targetTeams:target,required:req,played:played,missing:Math.max(0,req-played),internalRequired:intReq,internalPlayed:intPlayed,interzonalRequired:izReq,interzonalPlayed:izPlayed,complete:countOk&&played===req};
-  }
-  function computeZoneFixture(c,z){
-    var targetCat=c||category();
-    var targetZone=z||(targetCat?finalZoneOf(targetCat):null);
-    if(!targetCat||!targetZone){
-      return{valid:false,zoneId:null,teamIds:[],teamCount:0,totalMatches:0,matchesPerTeam:0,roundsCount:0,hasFreeDates:false,freeTeamsByRound:[],rounds:[],allMatches:[],matchesByTeam:{},playedMatchesCount:0,pendingMatchesCount:0};
-    }
-    var minTeams=isTorneo68(targetCat)?4:2;
-    var baseFixture=isFixtureSyncedWithZone(targetZone.fixture,targetZone.teamIds)?targetZone.fixture:buildRoundRobinFixture(targetZone.teamIds);
-    var stage=stageForZone(targetCat,targetZone.id);
-    var matchByPair={};
-    zoneMatches(targetCat.id,stage,targetZone.id).forEach(function(m){
-      if(m.matchType!==MATCH_TYPES.INTERZONAL&&m.matchType!==MATCH_TYPES.PLAYOFF&&Boolean(resolveMatchScore(m))){
-        matchByPair[pairKey(m.winnerId,m.loserId)]=m;
-      }
-    });
-    var matchesByTeam={};
-    targetZone.teamIds.forEach(function(id){matchesByTeam[id]=0;});
-    var allMatches=[],freeTeamsByRound=[],playedMatchesCount=0;
-    var rounds=(targetZone.teamIds.length>=minTeams?baseFixture.rounds:[]).map(function(r){
-      var freeTeam=r.freeTeamId?teamById(r.freeTeamId):null;
-      if(r.freeTeamId)freeTeamsByRound.push({round:r.round,roundName:r.name,teamId:r.freeTeamId,team:freeTeam});
-      var roundPlayed=0;
-      var items=(r.matches||[]).map(function(m){
-        var playedMatch=matchByPair[pairKey(m.teamAId,m.teamBId)]||null;
-        if(playedMatch){roundPlayed+=1;playedMatchesCount+=1;}
-        matchesByTeam[m.teamAId]=(matchesByTeam[m.teamAId]||0)+1;
-        matchesByTeam[m.teamBId]=(matchesByTeam[m.teamBId]||0)+1;
-        var enriched={
-          id:m.id,number:m.number,round:r.round,roundName:r.name,order:m.order,
-          teamAId:m.teamAId,teamBId:m.teamBId,
-          teamA:teamById(m.teamAId),teamB:teamById(m.teamBId),
-          match:playedMatch,played:Boolean(playedMatch)
-        };
-        allMatches.push(enriched);
-        return enriched;
-      });
-      return{round:r.round,name:r.name,freeTeamId:r.freeTeamId||null,freeTeam:freeTeam,playedCount:roundPlayed,totalCount:items.length,matches:items};
-    });
-    var valid=targetZone.teamIds.length>=minTeams;
-    var totalMatches=valid?baseFixture.totalMatches:0;
-    return{
-      valid:valid,zoneId:targetZone.id,teamIds:baseFixture.teamIds.slice(),teamCount:baseFixture.teamCount,
-      totalMatches:totalMatches,matchesPerTeam:valid?baseFixture.matchesPerTeam:0,
-      roundsCount:rounds.length,hasFreeDates:valid?baseFixture.hasFreeDates:false,
-      freeTeamsByRound:freeTeamsByRound,rounds:rounds,allMatches:allMatches,matchesByTeam:matchesByTeam,
-      playedMatchesCount:playedMatchesCount,pendingMatchesCount:Math.max(0,totalMatches-playedMatchesCount)
-    };
-  }
-  function generateFixture(zoneId){
-    var c=category();
-    if(!c)throw Error('Seleccioná una categoría.');
-    var z=zoneId?zoneById(c,zoneId):finalZoneOf(c);
-    if(!z)throw Error('Zona inexistente para generar el fixture.');
-    var minTeams=isTorneo68(c)?4:2;
-    if(z.teamIds.length<minTeams){
-      throw Error('Se requieren al menos '+minTeams+' equipos registrados para generar el torneo (actualmente hay '+z.teamIds.length+').');
-    }
-    z.fixture=buildRoundRobinFixture(z.teamIds);
-    saveState();
-    return computeZoneFixture(c,z);
-  }
-  function getFixture(categoryId,zoneId){
-    var targetCat=categoryId?state.categories.filter(function(c){return c.id===categoryId;})[0]:category();
-    if(!targetCat)return null;
-    var targetZone=zoneId?zoneById(targetCat,zoneId):finalZoneOf(targetCat);
-    return computeZoneFixture(targetCat,targetZone);
   }
   function resolveTie(scope,order){
     var c=category();
@@ -1235,8 +1105,8 @@
   function computePlayoffs(c){
     if(!c||!hasPlayoffsFormat(c))return{applicable:false,unlocked:false,reasons:[],slots:[],placementZones:[],allComplete:false};
     if(isTorneo68(c)){
-      var zU=finalZoneOf(c),eU=evaluateSecondZone(c,zU),teamCount68=eU.progress?eU.progress.teamCount:0,reasons=[];
-      if(!eU.zone||teamCount68<4)reasons.push('La Zona única requiere al menos 4 equipos inscriptos para generar la fase eliminatoria (actualmente hay '+teamCount68+').');
+      var zU=finalZoneOf(c),eU=evaluateSecondZone(c,zU),reasons=[];
+      if(!eU.zone||eU.progress.teamCount!==8)reasons.push('La Zona única requiere exactamente 8 equipos.');
       else if(!eU.progress.complete)reasons.push('Faltan '+eU.progress.missing+' de '+eU.progress.required+' partido(s) en la Zona única.');
       if(eU.unresolvedTies.length)reasons.push('Hay '+eU.unresolvedTies.length+' empate(s) sin resolver en la Zona única.');
       var unlocked=reasons.length===0,rows=unlocked?eU.ranking.rows:[];
@@ -1245,12 +1115,8 @@
       var semi2=makePlayoffSlot(c,{id:'semi-2',label:'Semifinal 2',group:'Semifinales',teamASource:'2° Tabla General',teamBSource:'3° Tabla General',teamA:t(1),teamB:t(2)});
       var fin=makePlayoffSlot(c,{id:'final',label:'Gran Final (1° y 2° Puesto)',group:'Finales',teamASource:'Ganador Semi 1',teamBSource:'Ganador Semi 2',teamA:semi1.winner,teamB:semi2.winner});
       var third=makePlayoffSlot(c,{id:'third-place',label:'3° y 4° Puesto',group:'Finales',teamASource:'Perdedor Semi 1',teamBSource:'Perdedor Semi 2',teamA:semi1.loser,teamB:semi2.loser});
-      var slots68=[semi1,semi2,fin,third],placement68=[];
-      if(teamCount68>4){
-        var pLabel68=teamCount68===5?'5° Puesto (Directo por Tabla General)':('Puestos 5° al '+teamCount68+'° (Directo por Tabla General)');
-        placement68.push({label:pLabel68,offset:5,eval:eU,sliceStart:4,sliceEnd:teamCount68});
-      }
-      return{applicable:true,unlocked:unlocked,reasons:reasons,slots:slots68,placementZones:placement68,allComplete:unlocked&&slots68.every(function(s){return Boolean(s.match);})};
+      var slots68=[semi1,semi2,fin,third];
+      return{applicable:true,unlocked:unlocked,reasons:reasons,slots:slots68,placementZones:[{label:'Puestos 5° al 8° (Directo por Tabla General)',offset:5,eval:eU,sliceStart:4,sliceEnd:8}],allComplete:unlocked&&slots68.every(function(s){return Boolean(s.match);})};
     }
     if(c.currentStage===STAGES.GENERAL){
       return{applicable:true,unlocked:false,reasons:['Primero cerrá la Fase de Grupos para armar las zonas de Segunda Fase.'],slots:[],placementZones:[],allComplete:false};
@@ -1570,11 +1436,10 @@
       return{step:2,tone:'ready',title:'Fase 1 en curso (+60) · '+prog.playedCount+'/45 partidos cargados',desc:'Cargá los 15 partidos de cada zona de 6 equipos (Zonas A, B y C).',ctaView:'results',ctaLabel:'Cargar resultado →'};
     }
     if(isTorneo68(c)){
-      var po68=computePlayoffs(c),fz68=finalZoneOf(c),p68=fz68?zoneProgressInfo(c,fz68,STAGES.ZONE_FINAL):{teamCount:0,required:0};
-      if(p68.teamCount<4)return{step:1,tone:'guide',title:'Paso 1: Registrá los equipos de la categoría (+68)',desc:'Inscriptos: '+p68.teamCount+' equipo'+(p68.teamCount===1?'':'s')+'. Se requieren al menos 4 equipos para generar el fixture y las eliminatorias.',ctaView:'zones',ctaLabel:'Agregar equipos'};
-      if(po68.allComplete)return{step:3,tone:'ready',title:'Torneo +68 definido · Clasificación final disponible',desc:'Ya se completaron la Zona única ('+p68.teamCount+' equipos) y los Cruces Finales (Semis, Final y 3°/4°).',ctaView:'positions',ctaLabel:'Ver clasificación final →'};
+      var po68=computePlayoffs(c);
+      if(po68.allComplete)return{step:3,tone:'ready',title:'Torneo +68 definido · Clasificación final disponible',desc:'Ya se completaron la Zona única y los Cruces Finales (Semis, Final y 3°/4°).',ctaView:'positions',ctaLabel:'Ver clasificación final →'};
       if(po68.unlocked)return{step:2,tone:'action',title:'Cruces Finales (+68) habilitados',desc:'Cargá Semifinal 1 (1° vs 4°), Semifinal 2 (2° vs 3°), Gran Final y 3°/4° puesto.',ctaView:'results',ctaLabel:'Cargar Cruces Finales →'};
-      return{step:2,tone:'ready',title:'Zona única (+68) en curso · '+prog.playedCount+'/'+p68.required+' partidos',desc:'Los '+p68.teamCount+' equipos inscriptos juegan todos contra todos ('+(p68.teamCount-1)+' partidos por equipo); los 4 primeros clasifican a Semifinales.',ctaView:'positions',ctaLabel:'Ver Tabla General →'};
+      return{step:2,tone:'ready',title:'Zona única (+68) en curso · '+prog.playedCount+'/28 partidos',desc:'Los 8 equipos juegan todos contra todos; los 4 primeros avanzan a Semifinales.',ctaView:'positions',ctaLabel:'Ver Tabla General →'};
     }
     if(prog.playedCount===0){
       return{step:2,tone:'action',title:'Paso 2: Cargá el resultado de un partido',desc:'Elegí la zona y los dos equipos que jugaron para anotar los puntos de cada set.',ctaView:'results',ctaLabel:'Ir a cargar resultado →'};
@@ -1759,7 +1624,7 @@
     var totalZones=state.categories.reduce(function(acc,c){return acc+zoneFlow(c).zones.length;},0);
     return'<div class="heading"><div><p class="eyebrow">PANEL DE CONTROL</p><h1>Mis Categorías</h1><p class="desc">Seleccioná una categoría para armar sus zonas, cargar resultados por set y consultar las posiciones.</p></div><div class="heading-actions"><button class="primary" data-action="new-category">＋ Nueva categoría</button></div></div>'+
       '<section class="onboarding-steps">'+
-        '<div class="onboard-step"><span class="onboard-num">1</span><div><b>Creá la categoría</b><small>+50 (14 eq.), +60 (18 eq.), +68 (Zona única + Semis/Final) o +40 genérico.</small></div></div>'+
+        '<div class="onboard-step"><span class="onboard-num">1</span><div><b>Creá la categoría</b><small>+50 (14 eq.), +60 (18 eq.), +68 (8 eq.) o +40 genérico.</small></div></div>'+
         '<div class="onboard-step"><span class="onboard-num">2</span><div><b>Armá zonas y cruces</b><small>Cargá los equipos y administrá el Interzonal C-D en +50.</small></div></div>'+
         '<div class="onboard-step"><span class="onboard-num">3</span><div><b>Cargá sets y mirá cruces</b><small>Tablas, triangulares, semifinales y clasificación final automática.</small></div></div>'+
       '</section>'+
@@ -1823,9 +1688,9 @@
     var stage=stageForZone(c,z.id),prog=zoneProgressInfo(c,z,stage);
     var target=zoneTargetTeams(c,z),isFull=Boolean(target&&assigned.length>=target);
     var fixedStructure=isTorneo50(c)||isTorneo60(c)||isTorneo68(c);
-    var phaseBadge=isTorneo68(c)?('ZONA ÚNICA · '+assigned.length+' EQUIPO'+(assigned.length===1?'':'S')+' INSCRIPTOS (TODOS CONTRA TODOS)'):(single?'TODOS CONTRA TODOS · ZONA ÚNICA':(ZONE_PHASE_LABELS[z.phase]||'FASE').toUpperCase()+' · TODOS CONTRA TODOS');
-    var countText=target?(assigned.length+'/'+target+' equipos'):(assigned.length+' equipo'+(assigned.length===1?'':'s')+(isTorneo68(c)?' inscripto'+(assigned.length===1?'':'s'):''));
-    var matchText=prog.interzonalRequired?(prog.internalPlayed+'/'+prog.internalRequired+' internos · '+prog.interzonalPlayed+'/'+prog.interzonalRequired+' interzonales'):(prog.played+'/'+prog.required+' partido'+(prog.required===1?'':'s')+(isTorneo68(c)&&assigned.length>=2?' programados ('+(assigned.length-1)+' por equipo)':''));
+    var phaseBadge=isTorneo68(c)?'ZONA ÚNICA · 8 EQUIPOS (TODOS CONTRA TODOS)':(single?'TODOS CONTRA TODOS · ZONA ÚNICA':(ZONE_PHASE_LABELS[z.phase]||'FASE').toUpperCase()+' · TODOS CONTRA TODOS');
+    var countText=target?(assigned.length+'/'+target+' equipos'):(assigned.length+' equipo'+(assigned.length===1?'':'s'));
+    var matchText=prog.interzonalRequired?(prog.internalPlayed+'/'+prog.internalRequired+' internos · '+prog.interzonalPlayed+'/'+prog.interzonalRequired+' interzonales'):(prog.played+'/'+prog.required+' partido'+(prog.required===1?'':'s'));
     return'<article class="card zone-card '+(!isQual&&!single?'zone-card-final':'')+'">'+
       '<div class="card-title">'+
         '<div><p class="eyebrow">'+phaseBadge+'</p><h2>'+esc(z.name)+'</h2><p class="desc">'+countText+' · '+matchText+'</p></div>'+
@@ -1918,79 +1783,17 @@
     '</section>';
   }
 
-  function renderFixtureSection(c,z){
-    if(!c||!z||!isTorneo68(c))return'';
-    var fx=computeZoneFixture(c,z);
-    if(fx.teamCount<4){
-      return'<section class="card fixture-card" id="fixture-section" style="margin-top:16px">'+
-        '<div class="toolbar">'+
-          '<div><p class="eyebrow">PLANIFICACIÓN AUTOMÁTICA POR RONDAS</p><h2>Fixture · Zona Única (+68)</h2><p class="desc">Equipos inscriptos: <strong>'+fx.teamCount+'</strong>. Registrá al menos 4 equipos para generar automáticamente el fixture todos contra todos y las llaves eliminatorias.</p></div>'+
-        '</div>'+
-      '</section>';
-    }
-    return'<section class="card fixture-card" id="fixture-section" style="margin-top:16px">'+
-      '<div class="toolbar">'+
-        '<div>'+
-          '<p class="eyebrow">PLANIFICACIÓN AUTOMÁTICA POR RONDAS · TODOS CONTRA TODOS</p>'+
-          '<h2>Fixture Oficial · '+fx.teamCount+' Equipos Inscriptos ('+fx.totalMatches+' Partidos Programados)</h2>'+
-          '<p class="desc">Cada equipo disputa <strong>'+fx.matchesPerTeam+' partidos</strong> a lo largo de <strong>'+fx.roundsCount+' fechas</strong>'+(fx.hasFreeDates?' (1 fecha libre por equipo, sin enfrentamientos ficticios)':' (todos los equipos juegan en cada fecha, sin fechas libres)')+'.</p>'+
-        '</div>'+
-        '<span class="badge">'+fx.playedMatchesCount+'/'+fx.totalMatches+' jugados · '+fx.roundsCount+' fechas</span>'+
-      '</div>'+
-      (fx.hasFreeDates?
-        '<div class="interzonal-status-grid" style="margin-top:12px">'+
-          '<div class="iz-summary-box" style="grid-column:1 / -1"><strong>Equipos con Fecha Libre por Ronda ('+fx.freeTeamsByRound.length+' fechas)</strong><span>'+
-            fx.freeTeamsByRound.map(function(ft){return esc(ft.roundName+': '+(ft.team?ft.team.name:'Equipo'));}).join(' · ')+
-          '</span></div>'+
-        '</div>'
-      :'')+
-      '<div class="zone-grid" style="margin-top:14px">'+
-        fx.rounds.map(function(round){
-          return'<article class="card" style="margin:0">'+
-            '<div class="card-title" style="margin-bottom:8px">'+
-              '<div><p class="eyebrow">RONDA '+round.round+' DE '+fx.roundsCount+'</p><h3>'+esc(round.name)+'</h3></div>'+
-              '<span class="badge">'+round.playedCount+'/'+round.totalCount+' jugados</span>'+
-            '</div>'+
-            (round.freeTeam?'<div class="qual-warning-list" style="margin:0 0 10px;padding:8px 12px"><strong>Fecha libre:</strong> '+esc(round.freeTeam.name)+'</div>':'')+
-            '<div class="zone-teams">'+
-              round.matches.map(function(m){
-                var aName=m.teamA?m.teamA.name:'Equipo A',bName=m.teamB?m.teamB.name:'Equipo B';
-                var sets=m.match?matchSetsFor(m.match):[];
-                var resText=m.match?(esc(teamById(m.match.winnerId).name)+' '+m.match.score.replace('-','–')+' '+esc(teamById(m.match.loserId).name)+(sets.length?' ('+sets.map(function(x){return x.a+'–'+x.b;}).join(', ')+')':'')):'Programado';
-                return'<div class="recent-item" data-fixture-match="'+esc(m.id)+'">'+
-                  '<span class="pos">'+m.number+'</span>'+
-                  '<span><b>'+esc(aName)+' vs '+esc(bName)+'</b><small style="display:block;color:var(--muted)">'+resText+'</small></span>'+
-                  (m.match?
-                    '<button type="button" class="link" data-action="edit-match" data-id="'+m.match.id+'">Editar</button>'
-                  :
-                    '<button type="button" class="secondary" data-action="load-fixture-match" data-zone-id="'+z.id+'" data-team-a="'+m.teamAId+'" data-team-b="'+m.teamBId+'">Cargar</button>'
-                  )+
-                '</div>';
-              }).join('')+
-            '</div>'+
-          '</article>';
-        }).join('')+
-      '</div>'+
-    '</section>';
-  }
-
   function zonesPage(){
     var c=category(),f=zoneFlow(c),single=isSingleZoneCategory(c);
     if(single){
       var singleZ=finalZoneOf(c)||f.zones[0];
-      var nTeams68=singleZ?singleZ.teamIds.length:0;
-      var totalMatches68=nTeams68>=2?(nTeams68*(nTeams68-1)/2):0;
-      var desc68=nTeams68>=4
-        ?('Equipos inscriptos: '+nTeams68+' · Partidos programados: '+totalMatches68+' ('+(nTeams68-1)+' por equipo'+(nTeams68%2===1?', con 1 fecha libre por equipo':'')+'). Los 4 primeros clasifican a Semifinales (1° vs 4° y 2° vs 3°).')
-        :('Equipos inscriptos: '+nTeams68+'. Registrá los equipos participantes (mínimo 4 equipos; se adapta automáticamente a 7, 8 o más equipos).');
       return'<section class="card zone-creator-bar">'+
           '<div class="toolbar">'+
-            '<div><p class="eyebrow">'+(isTorneo68(c)?'PASO 1 · CATEGORÍA +68 (ZONA ÚNICA · FORMATO ÁGUILAS DORADAS)':'PASO 1 · FORMATO TODOS CONTRA TODOS (ZONA ÚNICA)')+'</p><h2>Equipos de la Categoría</h2><p class="desc">'+(isTorneo68(c)?desc68:'Todos los equipos juegan todos contra todos en una única zona.')+'</p></div>'+
-            (isTorneo68(c)&&singleZ&&singleZ.teamIds.length===0?'<button type="button" class="secondary" data-action="preload-teams-68">Precargar 8 equipos de referencia</button>':'')+
+            '<div><p class="eyebrow">'+(isTorneo68(c)?'PASO 1 · CATEGORÍA +68 (8 EQUIPOS · ZONA ÚNICA)':'PASO 1 · FORMATO TODOS CONTRA TODOS (ZONA ÚNICA)')+'</p><h2>Equipos de la Categoría</h2><p class="desc">'+(isTorneo68(c)?'Los 8 equipos juegan todos contra todos (7 partidos por equipo). Del 1° al 4° pasan a Semifinales; 5° al 8° definen directo por tabla.':'Todos los equipos juegan todos contra todos en una única zona.')+'</p></div>'+
+            (isTorneo68(c)&&singleZ&&singleZ.teamIds.length===0?'<button type="button" class="secondary" data-action="preload-teams-68">Precargar 8 equipos confirmados</button>':'')+
           '</div>'+
         '</section>'+
-        (singleZ?'<div class="zone-grid">'+zoneCard(c,singleZ)+'</div>':'')+
-        (isTorneo68(c)&&singleZ?renderFixtureSection(c,singleZ):'');
+        (singleZ?'<div class="zone-grid">'+zoneCard(c,singleZ)+'</div>':'');
     }
     var qualZones=qualifyingZonesOf(c),secondZones=secondStageZonesOf(c);
     var evalQual=c.currentStage===STAGES.GENERAL&&qualZones.length?evaluateZoneQualification(c):null;
@@ -2083,10 +1886,7 @@
   }
   function renderZoneStandingsSheet(c,z,stage){
     var ranking=zoneRankingFull(c,z,stage),rows=ranking.rows,single=isSingleZoneCategory(c);
-    var tag68=rows.length>4
-      ?('ZONA ÚNICA · '+rows.length+' EQUIPOS · 1° AL 4° SEMIFINALES · '+(rows.length===5?'5° DIRECTO':('5° AL '+rows.length+'° DIRECTO')))
-      :('ZONA ÚNICA · '+rows.length+' EQUIPO'+(rows.length===1?'':'S')+' · 1° AL 4° SEMIFINALES');
-    var phaseTag=isTorneo68(c)?tag68:(single?'FASE ÚNICA · TODOS CONTRA TODOS':((ZONE_PHASE_LABELS[z.phase]||'FASE').toUpperCase()+' · TODOS CONTRA TODOS'));
+    var phaseTag=isTorneo68(c)?'ZONA ÚNICA · 1° AL 4° SEMIFINALES · 5° AL 8° DIRECTO':(single?'FASE ÚNICA · TODOS CONTRA TODOS':((ZONE_PHASE_LABELS[z.phase]||'FASE').toUpperCase()+' · TODOS CONTRA TODOS'));
     var headerTitle=(c.name.toUpperCase().indexOf('+50')>=0?'+50 ':c.name.toUpperCase().indexOf('+60')>=0?'+60 ':c.name.toUpperCase().indexOf('+68')>=0?'+68 ':'')+z.name.toUpperCase();
     var unresolved=ranking.ties.filter(function(t){return!t.resolved;});
     return'<section class="card official-sheet-card">'+
@@ -2383,11 +2183,11 @@
         '<label>Formato del torneo<select id="modal-category-format" name="format">'+
           '<option value="'+FORMATS.TORNEO_50+'">Categoría +50 · 14 equipos (4 zonas + Interzonal C-D + Cruces)</option>'+
           '<option value="'+FORMATS.TORNEO_60+'">Categoría +60 · 18 equipos (3 zonas de 6 + Zonas 1–6 + Cruces)</option>'+
-          '<option value="'+FORMATS.TORNEO_68+'">Categoría +68 · Zona única + Semifinales y Final</option>'+
+          '<option value="'+FORMATS.TORNEO_68+'">Categoría +68 · 8 equipos (Zona única + Semis y Final)</option>'+
           '<option value="'+FORMATS.ZONES_AND_FINAL+'">Zonas clasificatorias + Zona final (+40 / Genérico)</option>'+
           '<option value="'+FORMATS.ROUND_ROBIN+'">Todos contra todos en zona única (Genérico)</option>'+
         '</select></label>'+
-        '<label class="modal-check" id="preload-68-wrap" hidden><input type="checkbox" name="preloadTeams68" value="1"> Precargar los 8 equipos de referencia (+68)</label>'+
+        '<label class="modal-check" id="preload-68-wrap" hidden><input type="checkbox" name="preloadTeams68" value="1" checked> Precargar los 8 equipos confirmados (+68)</label>'+
         '<div class="modal-actions"><button type="button" class="cancel" data-action="close">Cancelar</button><button class="primary">Crear categoría</button></div></form></div>';
       var nameInp=document.getElementById('modal-category-name'),fmtSel=document.getElementById('modal-category-format'),pre68=document.getElementById('preload-68-wrap');
       var sync68=function(){if(pre68&&fmtSel)pre68.hidden=fmtSel.value!==FORMATS.TORNEO_68;};
@@ -2497,13 +2297,6 @@
       view='results';render();
       var firstInput=app.querySelector('[data-set-input="s1A"]');if(firstInput)firstInput.focus();
     };});
-    app.querySelectorAll('[data-action="load-fixture-match"]').forEach(function(e){e.onclick=function(){
-      var c=category(),zId=e.getAttribute('data-zone-id'),tA=e.getAttribute('data-team-a'),tB=e.getAttribute('data-team-b');
-      loaderDraft=initLoaderDraft(c,zId);
-      if(loaderDraft&&tA&&tB){loaderDraft.teamAId=tA;loaderDraft.teamBId=tB;}
-      view='results';render();
-      var firstInput=app.querySelector('[data-set-input="s1A"]');if(firstInput)firstInput.focus();
-    };});
 
     app.querySelectorAll('[data-action="delete-match"]').forEach(function(e){e.onclick=function(){var matchId=e.getAttribute('data-id'),match=state.matchResults.filter(function(r){return r.id===matchId;})[0],warning=match&&match.stage===STAGES.GENERAL&&category().currentStage===STAGES.ZONE_FINAL?'Este resultado pertenece a la fase de grupos. ¿Continuar?':(match&&match.matchType===MATCH_TYPES.PLAYOFF&&(match.bracketId==='semi-1'||match.bracketId==='semi-2')?'Si eliminás una semifinal también se eliminarán Final / 3° y 4° puesto si ya estaban cargados. ¿Continuar?':'¿Deshacer y eliminar este resultado?');if(confirm(warning)){if(toastState&&toastState.matchId===matchId)toastState=null;if(loaderDraft&&loaderDraft.editMatchId===matchId)loaderDraft=initLoaderDraft(category(),match?match.zoneId:undefined);run(function(){deleteMatchResult(matchId);},'Resultado deshecho y tabla recalculada.');}};});
     app.querySelectorAll('[data-action="edit-match"]').forEach(function(e){e.onclick=function(){var c=category(),match=state.matchResults.filter(function(r){return r.id===e.getAttribute('data-id');})[0];if(!c||!match)return;var sets=matchSetsFor(match);var zId=match.matchType===MATCH_TYPES.INTERZONAL?INTERZONAL_LOADER_ID:(match.matchType===MATCH_TYPES.PLAYOFF?PLAYOFFS_LOADER_ID:(match.zoneId||''));loaderDraft={categoryId:c.id,editMatchId:match.id,zoneId:zId,interzonalSlot:match.interzonalSlot||null,bracketId:match.bracketId||'',teamAId:match.winnerId,teamBId:match.loserId,s1A:sets[0]?String(sets[0].a):'',s1B:sets[0]?String(sets[0].b):'',s2A:sets[1]?String(sets[1].a):'',s2B:sets[1]?String(sets[1].b):'',s3A:sets[2]?String(sets[2].a):'',s3B:sets[2]?String(sets[2].b):'',historyOpen:true};view='results';render();var firstInput=app.querySelector('[data-set-input="s1A"]');if(firstInput)firstInput.focus();};});
@@ -2577,7 +2370,6 @@
     interzonalStatus:function(){var c=category();return interzonalStatus(c);},setInterzonalPair:setInterzonalPair,clearInterzonalPair:clearInterzonalPair,
     evaluateZoneQualification:evaluateZoneQualification,confirmZones:confirmZones,
     computePlayoffs:function(){return computePlayoffs(category());},computeFinalStandings:function(){return computeFinalStandings(category());},
-    generateFixture:generateFixture,getFixture:getFixture,buildRoundRobinFixture:buildRoundRobinFixture,
     resolveTie:resolveTie,clearTieResolution:clearTieResolution,
     addResult:createScoreEntry,addScore:createScoreEntry,addTraditionalResult:createMatchResult,addMatchResult:createMatchResult,
     addMatchFromSets:createMatchFromSets,addInterzonalMatchFromSets:createInterzonalMatchFromSets,addPlayoffMatchFromSets:createPlayoffMatchFromSets,

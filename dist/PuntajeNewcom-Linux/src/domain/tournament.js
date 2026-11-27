@@ -176,7 +176,6 @@
 
   function zoneTargetTeams(category, zone) {
     if (!category || !zone) return null;
-    if (isTorneo68(category)) return null;
     if (typeof zone.targetTeams === 'number' && zone.targetTeams > 0) return zone.targetTeams;
     if (isTorneo50(category)) {
       const found50 = TORNEO_50_SPEC.filter(function (s) { return s.code === zone.code || s.name.toLowerCase() === zone.name.toLowerCase(); })[0];
@@ -188,6 +187,7 @@
       if (zone.phase === ZONE_PHASES.QUALIFYING) return 6;
       return 3;
     }
+    if (isTorneo68(category)) return 8;
     return null;
   }
 
@@ -359,8 +359,7 @@
     const required = internalRequired + interzonalRequired;
     const played = internalPlayed + interzonalPlayed;
     const targetTeams = zoneTargetTeams(ctx.category, zone);
-    const minTeams = isTorneo68(ctx.category) ? 4 : 2;
-    const teamCountOk = targetTeams ? teamCount === targetTeams : teamCount >= minTeams;
+    const teamCountOk = targetTeams ? teamCount === targetTeams : teamCount >= 2;
     return {
       teamCount,
       targetTeams,
@@ -372,230 +371,6 @@
       interzonalRequired,
       interzonalPlayed,
       complete: teamCountOk && played === required
-    };
-  }
-
-  /**
-   * Genera automáticamente la planificación por rondas (fixture todos contra todos)
-   * adaptada a la cantidad real de equipos (Método del Círculo / Tablas de Berger).
-   * - Si la cantidad de equipos es impar (ej. 7 equipos): 7 fechas, 3 partidos por fecha (21 en total),
-   *   cada equipo juega 6 partidos y tiene exactamente 1 fecha libre sin crear equipos ni partidos ficticios.
-   * - Si la cantidad de equipos es par (ej. 8 equipos): 7 fechas, 4 partidos por fecha (28 en total),
-   *   cada equipo juega 7 partidos sin fechas libres.
-   */
-  function buildRoundRobinFixture(teamIds) {
-    const cleanIds = [];
-    const seen = {};
-    (Array.isArray(teamIds) ? teamIds : []).forEach(function (id) {
-      if (typeof id === 'string' && id.trim() && !seen[id]) {
-        seen[id] = true;
-        cleanIds.push(id);
-      }
-    });
-    const n = cleanIds.length;
-    if (n < 2) {
-      return {
-        teamIds: cleanIds,
-        teamCount: n,
-        totalMatches: 0,
-        matchesPerTeam: 0,
-        roundsCount: 0,
-        hasFreeDates: false,
-        rounds: []
-      };
-    }
-
-    const isOdd = (n % 2 === 1);
-    const slots = cleanIds.slice();
-    if (isOdd) {
-      slots.push(null); // Ranura virtual únicamente para determinar la fecha libre de cada ronda
-    }
-
-    const numSlots = slots.length;
-    const numRounds = numSlots - 1;
-    const half = numSlots / 2;
-    const rounds = [];
-    const seenPairs = {};
-    let current = slots.slice();
-    let matchCounter = 0;
-
-    for (let r = 1; r <= numRounds; r += 1) {
-      const roundMatches = [];
-      let freeTeamId = null;
-
-      for (let i = 0; i < half; i += 1) {
-        const a = current[i];
-        const b = current[numSlots - 1 - i];
-        if (a === null || b === null) {
-          freeTeamId = a === null ? b : a;
-        } else if (a !== b) {
-          const pk = pairKey(a, b);
-          if (!seenPairs[pk]) {
-            seenPairs[pk] = true;
-            matchCounter += 1;
-            const teamAId = (i === 0 && r % 2 === 0) ? b : a;
-            const teamBId = (i === 0 && r % 2 === 0) ? a : b;
-            roundMatches.push({
-              id: 'R' + r + '-M' + (roundMatches.length + 1),
-              number: matchCounter,
-              round: r,
-              order: roundMatches.length + 1,
-              teamAId,
-              teamBId
-            });
-          }
-        }
-      }
-
-      rounds.push({
-        round: r,
-        name: 'Fecha ' + r,
-        freeTeamId,
-        matches: roundMatches
-      });
-
-      const next = [current[0], current[numSlots - 1]];
-      for (let k = 1; k < numSlots - 1; k += 1) {
-        next.push(current[k]);
-      }
-      current = next;
-    }
-
-    return {
-      teamIds: cleanIds,
-      teamCount: n,
-      totalMatches: matchCounter,
-      matchesPerTeam: n - 1,
-      roundsCount: rounds.length,
-      hasFreeDates: isOdd,
-      rounds
-    };
-  }
-
-  function isFixtureSyncedWithZone(fixture, zoneTeamIds) {
-    if (!fixture || typeof fixture !== 'object' || !Array.isArray(fixture.teamIds) || !Array.isArray(fixture.rounds)) {
-      return false;
-    }
-    if (fixture.teamIds.length !== zoneTeamIds.length) return false;
-    for (let i = 0; i < zoneTeamIds.length; i += 1) {
-      if (fixture.teamIds[i] !== zoneTeamIds[i]) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Obtiene el fixture enriquecido de una zona, vinculando cada cruce programado
-   * con los equipos registrados y los resultados ya disputados.
-   */
-  function computeZoneFixture(ctx, zone) {
-    const category = ctx && ctx.category;
-    const targetZone = zone || (category ? finalZone(category) : null);
-    if (!category || !targetZone) {
-      return {
-        valid: false,
-        zoneId: null,
-        teamIds: [],
-        teamCount: 0,
-        totalMatches: 0,
-        matchesPerTeam: 0,
-        roundsCount: 0,
-        hasFreeDates: false,
-        freeTeamsByRound: [],
-        rounds: [],
-        allMatches: [],
-        matchesByTeam: {},
-        playedMatchesCount: 0,
-        pendingMatchesCount: 0
-      };
-    }
-
-    const minTeams = isTorneo68(category) ? 4 : 2;
-    const baseFixture = isFixtureSyncedWithZone(targetZone.fixture, targetZone.teamIds)
-      ? targetZone.fixture
-      : buildRoundRobinFixture(targetZone.teamIds);
-
-    const teamMap = {};
-    (ctx.teams || []).forEach(function (t) { teamMap[t.id] = t; });
-
-    const stage = stageForZone(category, targetZone.id);
-    const matchByPair = {};
-    scopeMatches(ctx, stage, targetZone.id).forEach(function (m) {
-      if (m.matchType !== MATCH_TYPES.INTERZONAL && m.matchType !== MATCH_TYPES.PLAYOFF) {
-        matchByPair[pairKey(m.winnerId, m.loserId)] = m;
-      }
-    });
-
-    const matchesByTeam = {};
-    targetZone.teamIds.forEach(function (id) { matchesByTeam[id] = 0; });
-
-    const allMatches = [];
-    const freeTeamsByRound = [];
-    let playedMatchesCount = 0;
-
-    const rounds = (targetZone.teamIds.length >= minTeams ? baseFixture.rounds : []).map(function (r) {
-      const freeTeam = r.freeTeamId ? (teamMap[r.freeTeamId] || null) : null;
-      if (r.freeTeamId) {
-        freeTeamsByRound.push({
-          round: r.round,
-          roundName: r.name,
-          teamId: r.freeTeamId,
-          team: freeTeam
-        });
-      }
-      let roundPlayed = 0;
-      const items = (r.matches || []).map(function (m) {
-        const playedMatch = matchByPair[pairKey(m.teamAId, m.teamBId)] || null;
-        if (playedMatch) {
-          roundPlayed += 1;
-          playedMatchesCount += 1;
-        }
-        matchesByTeam[m.teamAId] = (matchesByTeam[m.teamAId] || 0) + 1;
-        matchesByTeam[m.teamBId] = (matchesByTeam[m.teamBId] || 0) + 1;
-        const enriched = {
-          id: m.id,
-          number: m.number,
-          round: r.round,
-          roundName: r.name,
-          order: m.order,
-          teamAId: m.teamAId,
-          teamBId: m.teamBId,
-          teamA: teamMap[m.teamAId] || null,
-          teamB: teamMap[m.teamBId] || null,
-          match: playedMatch,
-          played: Boolean(playedMatch)
-        };
-        allMatches.push(enriched);
-        return enriched;
-      });
-      return {
-        round: r.round,
-        name: r.name,
-        freeTeamId: r.freeTeamId || null,
-        freeTeam,
-        playedCount: roundPlayed,
-        totalCount: items.length,
-        matches: items
-      };
-    });
-
-    const valid = targetZone.teamIds.length >= minTeams;
-    const totalMatches = valid ? baseFixture.totalMatches : 0;
-
-    return {
-      valid,
-      zoneId: targetZone.id,
-      teamIds: baseFixture.teamIds.slice(),
-      teamCount: baseFixture.teamCount,
-      totalMatches,
-      matchesPerTeam: valid ? baseFixture.matchesPerTeam : 0,
-      roundsCount: rounds.length,
-      hasFreeDates: valid ? baseFixture.hasFreeDates : false,
-      freeTeamsByRound,
-      rounds,
-      allMatches,
-      matchesByTeam,
-      playedMatchesCount,
-      pendingMatchesCount: Math.max(0, totalMatches - playedMatchesCount)
     };
   }
 
@@ -929,13 +704,9 @@
     if (isTorneo68(category)) {
       const zU = finalZone(category);
       const evalU = evaluateSecondStageZone(ctx, zU);
-      const teamCount = evalU.progress ? evalU.progress.teamCount : 0;
       const reasons = [];
-      if (!evalU.zone || teamCount < 4) {
-        reasons.push('La Zona única requiere al menos 4 equipos inscriptos para generar la fase eliminatoria (actualmente hay ' + teamCount + ').');
-      } else if (!evalU.progress.complete) {
-        reasons.push('Faltan ' + evalU.progress.missing + ' de ' + evalU.progress.required + ' partido(s) en la Zona única.');
-      }
+      if (!evalU.zone || evalU.progress.teamCount !== 8) reasons.push('La Zona única requiere exactamente 8 equipos.');
+      else if (!evalU.progress.complete) reasons.push('Faltan ' + evalU.progress.missing + ' de ' + evalU.progress.required + ' partido(s) en la Zona única.');
       if (evalU.unresolvedTies.length) reasons.push('Hay ' + evalU.unresolvedTies.length + ' empate(s) sin resolver en la Zona única.');
       const unlocked = reasons.length === 0;
       const rows = unlocked ? evalU.ranking.rows : [];
@@ -978,25 +749,12 @@
         teamB: semi2.loser
       });
       const slots = [semi1, semi2, finalSlot, thirdSlot];
-      const placementZones = [];
-      if (teamCount > 4) {
-        const placementLabel = teamCount === 5
-          ? '5° Puesto (Directo por Tabla General)'
-          : ('Puestos 5° al ' + teamCount + '° (Directo por Tabla General)');
-        placementZones.push({
-          label: placementLabel,
-          offset: 5,
-          eval: evalU,
-          sliceStart: 4,
-          sliceEnd: teamCount
-        });
-      }
       return {
         applicable: true,
         unlocked,
         reasons,
         slots,
-        placementZones,
+        placementZones: [{ label: 'Puestos 5° al 8° (Directo por Tabla General)', offset: 5, eval: evalU, sliceStart: 4, sliceEnd: 8 }],
         allComplete: unlocked && slots.every(function (s) { return Boolean(s.match); })
       };
     }
@@ -1300,9 +1058,6 @@
     zoneTeams,
     pairKey,
     zoneProgress,
-    buildRoundRobinFixture,
-    isFixtureSyncedWithZone,
-    computeZoneFixture,
     isFinalAccumulatedScope,
     qualifiedBaselineMap,
     syncCarriedStats,

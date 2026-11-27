@@ -106,9 +106,6 @@
       };
       if (typeof zone.code === 'string' && zone.code) normalized.code = zone.code;
       if (Number.isInteger(zone.targetTeams) && zone.targetTeams > 0) normalized.targetTeams = zone.targetTeams;
-      if (zone.fixture && tournament.isFixtureSyncedWithZone(zone.fixture, normalized.teamIds)) {
-        normalized.fixture = zone.fixture;
-      }
       return normalized;
     }) : [];
     const hasSecondStage = Boolean(secondStageId || zones.some(function (z) { return z.phase !== constants.ZONE_PHASES.QUALIFYING; }));
@@ -230,18 +227,6 @@
         zone.teamIds = zone.teamIds.filter(function (id) {
           return teams.some(function (team) { return team.id === id && team.categoryId === category.id; });
         });
-        if (tournament.isTorneo68(category)) {
-          delete zone.targetTeams;
-          if (zone.teamIds.length >= 4) {
-            if (!tournament.isFixtureSyncedWithZone(zone.fixture, zone.teamIds)) {
-              zone.fixture = tournament.buildRoundRobinFixture(zone.teamIds);
-            }
-          } else {
-            delete zone.fixture;
-          }
-        } else if (zone.fixture && !tournament.isFixtureSyncedWithZone(zone.fixture, zone.teamIds)) {
-          delete zone.fixture;
-        }
       });
       return category;
     });

@@ -158,49 +158,6 @@
     function interzonalStatus(categoryId) { return tournament.interzonalStatus(context(categoryId)); }
     function playoffs(categoryId) { return tournament.computePlayoffs(context(categoryId)); }
     function finalStandings(categoryId) { return tournament.computeFinalStandings(context(categoryId)); }
-    function fixture(categoryId, zoneId) {
-      const cid = categoryId || state.selectedCategoryId;
-      const ctx = context(cid);
-      if (!ctx) return null;
-      const zone = zoneId ? tournament.zoneById(ctx.category, zoneId) : tournament.finalZone(ctx.category);
-      return tournament.computeZoneFixture(ctx, zone);
-    }
-
-    function syncZoneFixtureForCategory(category, zone) {
-      if (!category || !zone) return;
-      const minTeams = tournament.isTorneo68(category) ? 4 : 2;
-      if (tournament.isTorneo68(category)) {
-        if (zone.teamIds.length >= minTeams) {
-          zone.fixture = tournament.buildRoundRobinFixture(zone.teamIds);
-        } else {
-          delete zone.fixture;
-        }
-      } else if (zone.fixture) {
-        if (zone.teamIds.length >= minTeams) {
-          zone.fixture = tournament.buildRoundRobinFixture(zone.teamIds);
-        } else {
-          delete zone.fixture;
-        }
-      }
-    }
-
-    function generateFixture(zoneId) {
-      const category = requireCategory();
-      const targetZone = zoneId ? tournament.zoneById(category, zoneId) : tournament.finalZone(category);
-      ensure(targetZone, 'Zona inexistente para generar el fixture.', 'ZONE_NOT_FOUND');
-      const minTeams = tournament.isTorneo68(category) ? 4 : 2;
-      ensure(
-        targetZone.teamIds.length >= minTeams,
-        'Se requieren al menos ' + minTeams + ' equipos registrados para generar el torneo (actualmente hay ' + targetZone.teamIds.length + ').',
-        'INSUFFICIENT_TEAMS'
-      );
-      commit(function () {
-        const c = categoryById(category.id);
-        const z = tournament.zoneById(c, targetZone.id);
-        z.fixture = tournament.buildRoundRobinFixture(z.teamIds);
-      });
-      return fixture(category.id, targetZone.id);
-    }
 
     // -------------------------------------------------------------------------
     // Preferencias y categorías
@@ -234,6 +191,7 @@
         const category = { id: newId('cat'), name: trimmed, format: chosen, currentStage: STAGES.GENERAL, championId: null, runnerUpId: null, zoneTournament: tournament.emptyZoneTournament() };
         if (chosen === FORMATS.ROUND_ROBIN || chosen === FORMATS.TORNEO_68) {
           const singleZone = { id: newId('zone'), code: 'U', name: constants.SINGLE_ZONE_NAME, phase: constants.ZONE_PHASES.FINAL, teamIds: [] };
+          if (chosen === FORMATS.TORNEO_68) singleZone.targetTeams = 8;
           category.currentStage = STAGES.ZONE_FINAL;
           category.zoneTournament = tournament.singleZoneTournament(singleZone);
           if (chosen === FORMATS.TORNEO_68 && opts && opts.preloadTeams68) {
@@ -242,7 +200,6 @@
               state.teams.push(team);
               singleZone.teamIds.push(team.id);
             });
-            syncZoneFixtureForCategory(category, singleZone);
           }
         } else if (chosen === FORMATS.TORNEO_50) {
           category.zoneTournament.zones = tournament.TORNEO_50_SPEC.map(function (spec) {
@@ -271,14 +228,12 @@
       return commit(function () {
         const c = categoryById(category.id);
         const z = tournament.finalZone(c);
-        const created = constants.DEFAULT_TEAMS_68.map(function (teamName) {
+        return constants.DEFAULT_TEAMS_68.map(function (teamName) {
           const team = { id: newId('team'), name: teamName, categoryId: c.id, status: STATUS.ACTIVE, stage: STAGES.ZONE_FINAL, scoreEntries: [] };
           state.teams.push(team);
           z.teamIds.push(team.id);
           return team;
         });
-        syncZoneFixtureForCategory(c, z);
-        return created;
       });
     }
 
@@ -347,15 +302,8 @@
         const c = categoryById(category.id);
         const team = { id: newId('team'), name: trimmed, categoryId: c.id, status: STATUS.ACTIVE, stage: single ? STAGES.ZONE_FINAL : STAGES.GENERAL, scoreEntries: [] };
         state.teams.push(team);
-        if (single) {
-          const fz = tournament.finalZone(c);
-          fz.teamIds.push(team.id);
-          syncZoneFixtureForCategory(c, fz);
-        } else if (zoneId) {
-          const tz = tournament.zoneById(c, zoneId);
-          tz.teamIds.push(team.id);
-          syncZoneFixtureForCategory(c, tz);
-        }
+        if (single) tournament.finalZone(c).teamIds.push(team.id);
+        else if (zoneId) tournament.zoneById(c, zoneId).teamIds.push(team.id);
         return team;
       });
     }
@@ -370,10 +318,7 @@
       ensure(!tournament.flow(category).qualified.some(function (q) { return q.teamId === teamId; }), 'No se puede eliminar un equipo clasificado a la zona única.', 'TEAM_QUALIFIED');
       return commit(function () {
         const c = categoryById(category.id);
-        tournament.flow(c).zones.forEach(function (zone) {
-          zone.teamIds = zone.teamIds.filter(function (id) { return id !== teamId; });
-          syncZoneFixtureForCategory(c, zone);
-        });
+        tournament.flow(c).zones.forEach(function (zone) { zone.teamIds = zone.teamIds.filter(function (id) { return id !== teamId; }); });
         state.teams = state.teams.filter(function (t) { return t.id !== teamId; });
       });
     }
@@ -1076,9 +1021,9 @@
       categoryEntries, context, standings, classificationPoints, resultPoints: scoring.resultPoints,
       zoneRanking, zoneProgress, qualification, finalClassification,
       qualificationDrift, phase, previewReconcile, previewQualificationImpact,
-      interzonalStatus, playoffs, finalStandings, fixture,
+      interzonalStatus, playoffs, finalStandings,
       // categorías y preferencias
-      selectCategory, setTheme, createCategory, editCategory, deleteCategory, convertToSingleZone, preloadTeams68, generateFixture,
+      selectCategory, setTheme, createCategory, editCategory, deleteCategory, convertToSingleZone, preloadTeams68,
       // equipos y cargas
       createTeam, deleteTeam, createScoreEntry, addQuickScores, deleteScoreEntry,
       // zonas e interzonal C-D
